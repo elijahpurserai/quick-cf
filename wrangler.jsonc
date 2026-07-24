@@ -6,10 +6,14 @@
   "main": "server/worker.ts",
 
   // Running Express (app.listen → http.createServer) via httpServerHandler needs the Node
-  // HTTP server modules. That flag auto-enables at compatibility_date >= 2025-09-01 with
-  // nodejs_compat; we also list it explicitly so it's unambiguous. Without it the runtime
-  // stubs http.createServer ("[unenv] http.createServer is not implemented yet").
-  "compatibility_date": "2025-09-01",
+  // HTTP server modules (the enable_nodejs_http_server_modules flag, auto-on at date >=
+  // 2025-09-01 with nodejs_compat; listed explicitly for clarity).
+  //
+  // The date is kept recent (2026-07-24) on purpose: an earlier fix in workerd (cloudflare/
+  // workerd#5084) makes express.json() populate req.body on POSTs under httpServerHandler,
+  // and that behavior is gated behind the compatibility date. At 2025-09-01 req.body was
+  // undefined and POST handlers 500'd. Do not lower this below the #5084 fix.
+  "compatibility_date": "2026-07-24",
   "compatibility_flags": ["nodejs_compat", "enable_nodejs_http_server_modules"],
 
   // Custom build — runs on every `wrangler deploy` (and in Cloudflare Workers Builds CI),
