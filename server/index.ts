@@ -1,10 +1,9 @@
+import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
 
-// NOTE: env loading lives in the entry points, not here — the Worker gets env from bindings
-// via server/env-shim.ts, and local dev loads website/.env in server/dev.ts before importing
-// this module. Do NOT reference __dirname here: it is undefined in the Workers runtime and
-// would throw at import time (this module is bundled into the Worker).
+// Load env vars BEFORE importing routes that use them
+dotenv.config({ path: path.resolve(__dirname, "../website/.env") });
 
 import express from "express";
 import cors from "cors";
@@ -46,32 +45,33 @@ const baseDomains = [
 console.log("Allowed Origins:", allowedOrigins);
 console.log("Base Domains (subdomains allowed):", baseDomains);
 
-app.use(cors({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (e.g. server-to-server, curl, mobile apps)
-        if (!origin) return callback(null, true);
+// Per-request CORS delegate. Single-origin means the SPA calls the API on the SAME host it
+// was served from — so the primary allow rule is same-origin: the Origin's host equals the
+// request Host. This works on the *.workers.dev URL in staging and on quickstory.ai in
+// production with no hardcoding. We also still allow the CLIENT_URL base domains (+ their
+// subdomains) and any explicitly-listed origins (localhost dev servers).
+app.use(cors((req: express.Request, callback) => {
+    const origin = req.header("Origin");
+    // No Origin header (same-origin GET/HEAD, server-to-server, curl) → allow.
+    if (!origin) return callback(null, { origin: true, credentials: true });
 
-        // Allow the base domains and any of their subdomains (e.g. api.*, www.*, staging.*)
-        if (baseDomains.length > 0) {
-            try {
-                const originHost = new URL(origin).hostname;
-                const isAllowedSubdomain = baseDomains.some(domain =>
-                    originHost === domain || originHost.endsWith(`.${domain}`)
-                );
-                if (isAllowedSubdomain) {
-                    return callback(null, true);
-                }
-            } catch { /* invalid origin URL, fall through */ }
+    let allowed = false;
+    try {
+        const originHost = new URL(origin).hostname;
+        const reqHost = (req.headers.host || "").split(":")[0];
+        // Same-origin: the request came from the very host serving it.
+        if (originHost && originHost === reqHost) {
+            allowed = true;
+        } else if (baseDomains.some(d => originHost === d || originHost.endsWith(`.${d}`))) {
+            // CLIENT_URL base domains and their subdomains.
+            allowed = true;
         }
+    } catch { /* invalid origin URL → not allowed */ }
 
-        // Allow explicitly listed origins (localhost dev servers, CLIENT_URL, etc.)
-        if (allowedOrigins.includes(origin)) {
-            return callback(null, true);
-        }
+    if (!allowed && allowedOrigins.includes(origin)) allowed = true;
 
-        callback(new Error(`CORS: origin ${origin} not allowed`));
-    },
-    credentials: true,
+    if (allowed) return callback(null, { origin: true, credentials: true });
+    return callback(new Error(`CORS: origin ${origin} not allowed`));
 }));
 
 app.use(express.json());
@@ -114,6 +114,13 @@ app.get("/health", (req, res) => {
 // Local dev (dev.ts via nodemon) has no assets binding — Vite serves the frontend and
 // proxies /api here — so we fall back to reading website/dist/index.html off disk if a
 // build exists. Same-origin means the old two-service CDN-proxy hack is gone entirely.
+const localDistCandidates = [
+    path.resolve(__dirname, "../website/dist"),    // dev: __dirname = server/
+    path.resolve(__dirname, "../../website/dist"), // ts-node/compiled: __dirname = server/dist/
+    path.resolve(process.cwd(), "website/dist"),   // fallback: relative to cwd
+];
+const localDistPath = localDistCandidates.find(p => fs.existsSync(p));
+
 async function getBaseIndexHtml(req: express.Request): Promise<string | null> {
     const assets = (globalThis as any).__ASSETS__;
     if (assets && typeof assets.fetch === "function") {
@@ -127,14 +134,11 @@ async function getBaseIndexHtml(req: express.Request): Promise<string | null> {
         }
         return null;
     }
-    // Local dev fallback: read the built index.html from disk if present. Computed lazily
-    // (never at module load) and via process.cwd() rather than __dirname, so nothing here
-    // runs — or references a Workers-undefined global — in the Worker, where ASSETS is set.
-    for (const rel of ["website/dist/index.html", "../website/dist/index.html"]) {
+    // Local dev fallback: read the built index.html from disk if present.
+    if (localDistPath) {
         try {
-            const p = path.resolve(process.cwd(), rel);
-            if (fs.existsSync(p)) return fs.readFileSync(p, "utf8");
-        } catch { /* ignore — no local build present */ }
+            return fs.readFileSync(path.join(localDistPath, "index.html"), "utf8");
+        } catch { /* fall through */ }
     }
     return null;
 }
