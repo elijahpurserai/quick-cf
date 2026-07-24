@@ -1,9 +1,10 @@
-import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
 
-// Load env vars BEFORE importing routes that use them
-dotenv.config({ path: path.resolve(__dirname, "../website/.env") });
+// NOTE: env loading lives in the entry points, not here — the Worker gets env from bindings
+// via server/env-shim.ts, and local dev loads website/.env in server/dev.ts before importing
+// this module. Do NOT reference __dirname here: it is undefined in the Workers runtime and
+// would throw at import time (this module is bundled into the Worker).
 
 import express from "express";
 import cors from "cors";
@@ -113,13 +114,6 @@ app.get("/health", (req, res) => {
 // Local dev (dev.ts via nodemon) has no assets binding — Vite serves the frontend and
 // proxies /api here — so we fall back to reading website/dist/index.html off disk if a
 // build exists. Same-origin means the old two-service CDN-proxy hack is gone entirely.
-const localDistCandidates = [
-    path.resolve(__dirname, "../website/dist"),    // dev: __dirname = server/
-    path.resolve(__dirname, "../../website/dist"), // ts-node/compiled: __dirname = server/dist/
-    path.resolve(process.cwd(), "website/dist"),   // fallback: relative to cwd
-];
-const localDistPath = localDistCandidates.find(p => fs.existsSync(p));
-
 async function getBaseIndexHtml(req: express.Request): Promise<string | null> {
     const assets = (globalThis as any).__ASSETS__;
     if (assets && typeof assets.fetch === "function") {
@@ -133,11 +127,14 @@ async function getBaseIndexHtml(req: express.Request): Promise<string | null> {
         }
         return null;
     }
-    // Local dev fallback: read the built index.html from disk if present.
-    if (localDistPath) {
+    // Local dev fallback: read the built index.html from disk if present. Computed lazily
+    // (never at module load) and via process.cwd() rather than __dirname, so nothing here
+    // runs — or references a Workers-undefined global — in the Worker, where ASSETS is set.
+    for (const rel of ["website/dist/index.html", "../website/dist/index.html"]) {
         try {
-            return fs.readFileSync(path.join(localDistPath, "index.html"), "utf8");
-        } catch { /* fall through */ }
+            const p = path.resolve(process.cwd(), rel);
+            if (fs.existsSync(p)) return fs.readFileSync(p, "utf8");
+        } catch { /* ignore — no local build present */ }
     }
     return null;
 }
