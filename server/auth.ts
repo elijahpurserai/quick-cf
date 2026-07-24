@@ -6,19 +6,12 @@ import crypto from "crypto";
 import { supabase } from "./supabase";
 import { APPROVED_EMAILS } from "./config";
 
-// Derive cookie domain from CLIENT_URL so cookies work across subdomains.
-// e.g. "https://quickstory.ai" → ".quickstory.ai"
-// In dev (localhost), leave undefined so cookies stay on the exact host.
-const COOKIE_DOMAIN = (() => {
-    try {
-        const host = new URL(process.env.CLIENT_URL || "").hostname;
-        // Don't set domain for localhost / IP addresses
-        if (host === "localhost" || /^\d+\./.test(host)) return undefined;
-        return `.${host}`;
-    } catch {
-        return undefined;
-    }
-})();
+// Single-origin (SPA + API on one Worker): use a HOST-ONLY cookie (no explicit Domain), so
+// the JWT cookie is valid on whatever host serves the app — the *.workers.dev URL in staging
+// and quickstory.ai in production — with no coupling to CLIENT_URL. Previously this was
+// ".quickstory.ai" to span the old api.quickstory.ai subdomain, which no longer exists; a
+// domain-scoped cookie would be rejected by the browser on the workers.dev host.
+const COOKIE_DOMAIN = undefined;
 
 export const authRoutes = Router();
 
