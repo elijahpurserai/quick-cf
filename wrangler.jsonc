@@ -5,10 +5,12 @@
   "name": "quick-cf",
   "main": "server/worker.ts",
 
-  // node:http server support (httpServerHandler) requires a recent compat date + nodejs_compat.
-  // Bump this to today's date when you first deploy; the value below is a safe floor.
-  "compatibility_date": "2025-05-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // Running Express (app.listen → http.createServer) via httpServerHandler needs the Node
+  // HTTP server modules. That flag auto-enables at compatibility_date >= 2025-09-01 with
+  // nodejs_compat; we also list it explicitly so it's unambiguous. Without it the runtime
+  // stubs http.createServer ("[unenv] http.createServer is not implemented yet").
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat", "enable_nodejs_http_server_modules"],
 
   // Custom build — runs on every `wrangler deploy` (and in Cloudflare Workers Builds CI),
   // BEFORE bundling/asset validation. Installs the website + server deps and builds
