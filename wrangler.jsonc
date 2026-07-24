@@ -10,6 +10,15 @@
   "compatibility_date": "2025-05-01",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Custom build — runs on every `wrangler deploy` (and in Cloudflare Workers Builds CI),
+  // BEFORE bundling/asset validation. Installs the website + server deps and builds
+  // website/dist. Cloudflare Workers Builds auto-installs the ROOT deps first, but not the
+  // per-package ones, so we install them here. The frontend's public VITE_* build vars come
+  // from website/.env.production (committed). No dashboard build config needed.
+  "build": {
+    "command": "cd website && npm install && npm run build && cd ../server && npm install"
+  },
+
   "assets": {
     "directory": "./website/dist",
     "binding": "ASSETS",

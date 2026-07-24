@@ -5,8 +5,8 @@
         "start": "./start-dev.sh",
         "dev": "./start-dev.sh",
         "build:web": "cd website && npm run build",
-        "cf:dev": "npm run build:web && wrangler dev",
-        "deploy": "npm run build:web && wrangler deploy",
+        "cf:dev": "wrangler dev",
+        "deploy": "wrangler deploy",
         "deploy:git": "./tools/deploy.sh"
     },
     "devDependencies": {
