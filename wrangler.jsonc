@@ -31,9 +31,11 @@
     // Serve /index.html for unmatched client-side routes (React Router).
     "not_found_handling": "single-page-application",
     // Hand these paths to the Worker (Express) BEFORE static assets:
-    //  - /api/*            → API routes
-    //  - SEO files         → sitemap.ts / robots.txt
-    //  - story/lesson HTML → OG meta-tag injection (buildPageHtml)
+    //  - /api/*                    → API routes
+    //  - SEO files                 → sitemap.ts / robots.txt
+    //  - story/lesson HTML         → seoPrerender (bots) / SPA (browsers)
+    //  - all-stories/all-lessons,  → seoPrerender directory + category prerender for bots.
+    //    /cat, /tag directory        Browsers still fall through to the clean SPA.
     // Everything else (hashed JS/CSS, images, favicon) is served free from Static Assets.
     "run_worker_first": [
       "/api/*",
@@ -41,7 +43,19 @@
       "/sitemap.xml",
       "/sitemap-*.xml",
       "/*/story/*",
-      "/*/lesson/*"
+      "/*/lesson/*",
+      "/all-stories",
+      "/all-lessons",
+      "/*/all-stories",
+      "/*/all-lessons",
+      "/sitemap/all-stories",
+      "/sitemap/all-lessons",
+      "/*/sitemap/all-stories",
+      "/*/sitemap/all-lessons",
+      "/cat/*",
+      "/*/cat/*",
+      "/tag/*",
+      "/*/tag/*"
     ]
   },
 

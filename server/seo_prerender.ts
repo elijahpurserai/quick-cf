@@ -227,7 +227,7 @@ async function prerenderDirectoryPage(
         // Fetch all public creations of this type for the given language
         const { data: creations, error } = await supabase
             .from("creations")
-            .select(`slug, title, english_title, description, ${table}(language, ${titleCol})`)
+            .select(`slug, title, english_title, description, ${table}(language)`)
             .eq("type", type)
             .eq("visibility", "public")
             .order("title", { ascending: true })
