@@ -10,7 +10,7 @@ import { TestCategory, TestResult } from "./types";
 import { supabase } from "../supabase";
 
 const SERVER_PORT = process.env.PORT || 3001;
-const BASE_URL = `http://localhost:${SERVER_PORT}`;
+const BASE_URL = process.env.TEST_BASE_URL || `http://localhost:${SERVER_PORT}`;
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
 
 async function httpGet(path: string, cookie?: string): Promise<{ status: number; body: any }> {

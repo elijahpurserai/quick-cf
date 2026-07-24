@@ -7,7 +7,7 @@
 import { TestCategory, TestResult } from "./types";
 
 const SERVER_PORT = process.env.PORT || 3001;
-const BASE_URL = `http://localhost:${SERVER_PORT}`;
+const BASE_URL = process.env.TEST_BASE_URL || `http://localhost:${SERVER_PORT}`;
 
 /** Helper: make a GET request and return { status, text, headers } */
 async function httpGet(path: string, headers: Record<string, string> = {}): Promise<{

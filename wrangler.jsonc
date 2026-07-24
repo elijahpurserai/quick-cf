@@ -52,7 +52,12 @@
     "CLIENT_URL": "https://quickstory.ai",
     // Public (also baked into the frontend bundle). The Worker's server code reads
     // process.env.VITE_SUPABASE_URL for the service-role Supabase client.
-    "VITE_SUPABASE_URL": "https://cjowsngbmaolaugvtyxm.supabase.co"
+    "VITE_SUPABASE_URL": "https://cjowsngbmaolaugvtyxm.supabase.co",
+    // Origin the in-app test suite (server/tests/*) targets. On the Worker there is no
+    // localhost, so the tests hit this public URL (self-request) instead. Update this to
+    // https://quickstory.ai when you cut the production domain over. Locally it's unset,
+    // so the suite falls back to http://localhost:3001 (the dev server).
+    "TEST_BASE_URL": "https://quick-cf.imaginationai.workers.dev"
   },
 
   "observability": { "enabled": true }

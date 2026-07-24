@@ -221,11 +221,16 @@ async function buildPageHtml(reqPath: string, baseHtml: string): Promise<string>
 // Injects OG meta tags into the built index.html so social/SEO bots (WhatsApp,
 // Facebook, X, etc.) see correct preview data, while browsers run the React SPA normally.
 app.get(/.*/, async (req, res) => {
+    // Only real browsers reach this catch-all: seoPrerender (registered above) already
+    // intercepts known bots for story/lesson/directory/tag paths and serves full prerendered
+    // HTML. So here we serve the clean SPA shell — the React app fills meta tags client-side
+    // (website/src/app/utils/seo.ts). We intentionally do NOT run buildPageHtml() here: it
+    // would add two Supabase queries to every browser page view (for OG tags the browser
+    // doesn't need) and inject a second <title>, without any SEO benefit (bots don't reach here).
     const baseHtml = await getBaseIndexHtml(req);
     if (baseHtml) {
         res.setHeader("Content-Type", "text/html");
-        const html = await buildPageHtml(req.path, baseHtml);
-        return res.send(html);
+        return res.send(baseHtml);
     }
     res.status(503).send("Frontend not built. Run `npm run build` in /website.");
 });
