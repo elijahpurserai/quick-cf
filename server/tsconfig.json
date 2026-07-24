@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+        "target": "es2016",
+        "module": "commonjs",
+        "outDir": "./dist",
+        "esModuleInterop": true,
+        "forceConsistentCasingInFileNames": true,
+        "strict": true,
+        "skipLibCheck": true
+    },
+    // worker.ts and env-shim.ts import Workers-only modules ("cloudflare:workers",
+    // "cloudflare:node") and are bundled by wrangler/esbuild, not by this tsc build
+    // (which targets local Node dev + jest). Exclude them so `npm run build` stays clean.
+    "exclude": ["node_modules", "dist", "worker.ts", "env-shim.ts"]
+}

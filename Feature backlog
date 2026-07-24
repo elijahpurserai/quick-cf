@@ -1,0 +1,15 @@
+##Feature backlog
+
+Generation:
+1. When generating UI: explain what its building using the prompt parts.
+
+Analytics:
+1. differentiate local vs none local events
+
+Story:
+1. Voice for the story?
+2. Video for the story?
+3. Next chapter generation
+
+Personalization:
+1. Add an option to upload the child's picture as the hero

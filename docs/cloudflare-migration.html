@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cloudflare Migration Plan</title>
+<!--
+  Design-doc review template.
+  Fill ONLY:
+    - the hero block  (<header class="hero">…</header>)
+    - the section cards inside <main id="doc">  (each <section class="card"> starts with an <h2>)
+  Section numbers and the table of contents auto-generate from the <h2>s.
+  DO NOT edit the <style> or the <script> commenting engine below.
+  Review flow: select text in any card → 💬 Comment → write note. Then use the
+  dock's "Copy for Claude" / "Download .md" to export into docs/<slug>.comments.md.
+-->
+<style>
+  /* Light is the default. Dark is opt-in via html[data-theme="dark"]. */
+  :root{
+    --bg:#f5f6f8; --bg-grad:radial-gradient(1100px 560px at 72% -12%,#eaeef4 0%,var(--bg) 60%);
+    --panel:#ffffff; --panel-2:#f2f4f7; --edge:#dde2e8;
+    --ink:#1b2430; --ink-dim:#54626f; --ink-faint:#8895a2;
+    --gold:#9a7212; --gold-dim:#b8933f; --ember:#c9532c; --frost:#2a7bb0;
+    --green:#2e9e57; --red:#c8382f; --mark:#fff2bf; --mark-edge:#e5c65a;
+    --accent:#cf9a1f; --accent-hover:#e0ad3a; --on-accent:#2a2005;
+    --title1:#8a6410; --title2:#c99a2a; --code:#9c4a1e; --strong:#0d1622;
+    --shadow:0 12px 30px -18px rgba(20,30,45,.30);
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  html[data-theme="dark"]{
+    --bg:#0e1116; --bg-grad:radial-gradient(1200px 600px at 70% -10%,#1a2230 0%,var(--bg) 55%);
+    --panel:#161b23; --panel-2:#1c232d; --edge:#2a3340;
+    --ink:#e8edf3; --ink-dim:#9fb0c3; --ink-faint:#6b7c90;
+    --gold:#e0b64d; --gold-dim:#8a6f2e; --ember:#e0693d; --frost:#4db2e0;
+    --green:#5fbf7a; --red:#d9584f; --mark:#3a3320; --mark-edge:#6e5e2a;
+    --accent:#e0b64d; --accent-hover:#f0cf6b; --on-accent:#241d05;
+    --title1:#e0b64d; --title2:#f4d98a; --code:#d9c48a; --strong:#ffffff;
+    --shadow:0 10px 34px -12px rgba(0,0,0,.7);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg-grad);
+    color:var(--ink);font-family:var(--sans);line-height:1.62;font-size:16px;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 24px 140px;
+    display:grid;grid-template-columns:230px minmax(0,1fr);gap:34px}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr;padding-top:18px}
+    nav.toc{position:static !important;max-height:none !important}}
+
+  /* hero */
+  .hero{grid-column:1/-1;border:1px solid var(--edge);border-radius:16px;
+    background:linear-gradient(180deg,var(--panel-2),var(--panel));padding:30px 34px;
+    box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;inset:0;
+    background:radial-gradient(500px 180px at 88% 0%,rgba(224,182,77,.14),transparent 70%);pointer-events:none}
+  .hero h1{margin:.1em 0 .5em;font-size:29px;letter-spacing:.2px;
+    background:linear-gradient(90deg,var(--title1),var(--title2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold-dim)}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:14px}
+  .meta .chip{font-size:12.5px;color:var(--ink-dim);background:var(--bg);
+    border:1px solid var(--edge);border-radius:999px;padding:4px 11px}
+  .meta .chip b{color:var(--ink);font-weight:600}
+  .theme-toggle{position:absolute;top:16px;right:18px;z-index:5;cursor:pointer;
+    background:var(--panel);color:var(--ink-dim);border:1px solid var(--edge);border-radius:999px;
+    padding:6px 13px;font:inherit;font-size:12.5px;font-weight:600}
+  .theme-toggle:hover{color:var(--ink);border-color:var(--accent)}
+  .hero .lede{margin:16px 0 0;color:var(--ink-dim);max-width:78ch}
+
+  /* toc */
+  nav.toc{position:sticky;top:20px;align-self:start;max-height:calc(100vh - 40px);overflow:auto;
+    border:1px solid var(--edge);border-radius:14px;background:var(--panel);padding:16px 14px}
+  nav.toc h4{margin:2px 6px 10px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+  nav.toc a{display:block;padding:6px 9px;border-radius:8px;color:var(--ink-dim);text-decoration:none;
+    font-size:13.5px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel-2);color:var(--ink)}
+  nav.toc a.active{color:var(--gold);border-left-color:var(--gold);background:var(--panel-2)}
+  nav.toc a .n{font-family:var(--mono);color:var(--ink-faint);margin-right:7px}
+
+  /* doc */
+  main#doc{grid-column:2/3;min-width:0}
+  @media(max-width:900px){main#doc{grid-column:1/-1}}
+  .card{border:1px solid var(--edge);border-radius:14px;background:var(--panel);
+    padding:24px 28px;margin:0 0 20px;box-shadow:var(--shadow)}
+  .card h2{margin:.1em 0 .7em;font-size:21px;scroll-margin-top:20px;
+    padding-bottom:.4em;border-bottom:1px solid var(--edge)}
+  .card h2 .n{font-family:var(--mono);color:var(--gold);margin-right:10px;font-size:.85em}
+  .card h3{font-size:16px;color:var(--gold);margin:1.4em 0 .5em}
+  .card p{margin:.7em 0}
+  .card ul,.card ol{margin:.6em 0;padding-left:1.35em}
+  .card li{margin:.32em 0}
+  .card a{color:var(--frost)}
+  .card code{font-family:var(--mono);font-size:.88em;background:var(--bg);
+    border:1px solid var(--edge);border-radius:5px;padding:1px 5px;color:var(--code)}
+  .card strong{color:var(--strong)}
+  table{width:100%;border-collapse:collapse;margin:1em 0;font-size:14px}
+  th,td{border:1px solid var(--edge);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:var(--ink);font-weight:600}
+  td code{white-space:nowrap}
+  hr{border:none;border-top:1px solid var(--edge);margin:0}
+  mark.cmt{background:var(--mark);color:inherit;border-bottom:2px solid var(--mark-edge);
+    border-radius:2px;padding:0 1px;cursor:pointer}
+
+  /* selection popup */
+  #cmt-pop{position:absolute;z-index:60;display:none;transform:translate(-50%,-100%)}
+  #cmt-pop button{font:inherit;font-size:13px;cursor:pointer;background:var(--accent);color:var(--on-accent);
+    border:none;border-radius:8px;padding:7px 12px;font-weight:700;box-shadow:var(--shadow)}
+  #cmt-pop button:hover{background:var(--accent-hover)}
+
+  /* composer */
+  #cmt-composer{position:absolute;z-index:61;display:none;width:320px;background:var(--panel-2);
+    border:1px solid var(--edge);border-radius:12px;box-shadow:var(--shadow);padding:14px}
+  #cmt-composer .q{font-size:12.5px;color:var(--ink-dim);border-left:3px solid var(--gold);
+    padding:3px 0 3px 9px;margin-bottom:9px;max-height:70px;overflow:auto}
+  #cmt-composer textarea{width:100%;min-height:80px;resize:vertical;background:var(--bg);color:var(--ink);
+    border:1px solid var(--edge);border-radius:8px;padding:9px;font:inherit;font-size:14px}
+  #cmt-composer .row{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+  #cmt-composer .row button{font:inherit;font-size:13px;cursor:pointer;border-radius:8px;padding:7px 13px;font-weight:600}
+  #cmt-composer .save{background:var(--accent);color:var(--on-accent);border:none}
+  #cmt-composer .cancel{background:transparent;color:var(--ink-dim);border:1px solid var(--edge)}
+
+  /* dock */
+  #dock-toggle{position:fixed;right:20px;bottom:20px;z-index:70;cursor:pointer;
+    background:var(--accent);color:var(--on-accent);border:none;border-radius:999px;padding:12px 18px;
+    font-weight:800;font-size:14px;box-shadow:var(--shadow)}
+  #dock-toggle .badge{display:inline-flex;min-width:20px;height:20px;align-items:center;justify-content:center;
+    background:var(--on-accent);color:var(--accent);border-radius:999px;font-size:12px;margin-left:8px;padding:0 5px}
+  #dock{position:fixed;top:0;right:0;height:100%;width:380px;max-width:92vw;z-index:69;
+    background:var(--panel);border-left:1px solid var(--edge);box-shadow:var(--shadow);
+    transform:translateX(100%);transition:transform .22s ease;display:flex;flex-direction:column}
+  #dock.open{transform:none}
+  #dock header{padding:16px 18px;border-bottom:1px solid var(--edge);display:flex;align-items:center;justify-content:space-between}
+  #dock header h3{margin:0;font-size:15px}
+  #dock header .x{cursor:pointer;background:none;border:none;color:var(--ink-dim);font-size:20px}
+  #dock .list{flex:1;overflow:auto;padding:12px 14px}
+  #dock .empty{color:var(--ink-faint);font-size:14px;text-align:center;margin-top:40px}
+  .cmt-item{border:1px solid var(--edge);border-radius:10px;background:var(--panel-2);padding:11px 12px;margin-bottom:10px}
+  .cmt-item .sec{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--gold-dim);margin-bottom:5px}
+  .cmt-item .q{font-size:12.5px;color:var(--ink-dim);border-left:3px solid var(--gold-dim);padding-left:8px;margin-bottom:7px}
+  .cmt-item .body{font-size:14px;white-space:pre-wrap}
+  .cmt-item .del{float:right;cursor:pointer;background:none;border:none;color:var(--ink-faint);font-size:12px}
+  .cmt-item .del:hover{color:var(--red)}
+  .cmt-item{cursor:pointer}
+  .cmt-item.flash{outline:2px solid var(--accent);outline-offset:1px}
+  mark.cmt{transition:background .15s}
+  mark.cmt:hover{background:var(--mark-edge)}
+  mark.cmt.flash{background:var(--accent);color:var(--on-accent)}
+  #dock .actions{padding:12px 14px;border-top:1px solid var(--edge);display:flex;gap:8px}
+  #dock .actions button{flex:1;font:inherit;font-size:13px;font-weight:700;cursor:pointer;border-radius:9px;padding:9px}
+  #dock .actions .primary{background:var(--accent);color:var(--on-accent);border:none}
+  #dock .actions .ghost{background:transparent;color:var(--ink);border:1px solid var(--edge)}
+
+  #toast{position:fixed;bottom:78px;right:20px;z-index:80;background:var(--panel-2);color:var(--ink);
+    border:1px solid var(--edge);border-left:3px solid var(--green);border-radius:9px;padding:11px 15px;
+    font-size:14px;box-shadow:var(--shadow);opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}
+  #toast.show{opacity:1;transform:none}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- ══ HERO — fill this ══ -->
+    <header class="hero">
+      <button class="theme-toggle" id="theme-toggle" type="button">🌙 Dark</button>
+      <div class="eyebrow">QUICK · INFRASTRUCTURE</div>
+      <h1>Cloudflare Migration Plan</h1>
+      <div class="meta">
+        <span class="chip"><b>Status:</b> In review (round 1) — backend Worker-ization implemented (batch 1 landed)</span>
+        <span class="chip"><b>Scope:</b> Move hosting off Render onto a single Cloudflare Worker; Supabase unchanged</span>
+        <span class="chip"><b>Related:</b> og_resolver_design · web-site-server-interaction · creation-image-optimization</span>
+        <span class="chip"><b>Author:</b> Elijah</span>
+        <span class="chip"><b>Project:</b> Quick (quickstory.ai)</span>
+      </div>
+      <p class="lede">Quick runs today as two Render services — a static CDN for the Vite/React frontend and a Node/Express API — split across <code>quickstory.ai</code> and <code>api.quickstory.ai</code>. That split is the source of most of the accidental complexity in the codebase: an in-memory proxy of the CDN's <code>index.html</code> to dodge asset-hash mismatches, a Render rewrite-rule workaround for OG injection, and cross-subdomain CORS and cookie handling. This plan collapses both services into <strong>one Cloudflare Worker on a single origin</strong> (<code>quickstory.ai</code>): Workers Static Assets serves the frontend, the existing Express app runs on the same Worker via the Node-compat <code>httpServerHandler</code> shim, and Cloudflare DNS/CDN/compute all live in one account — the consolidation goal. The one hard blocker is <code>sharp</code> (a native binary that will not run in a Worker); it is used in exactly two admin-only code paths that already degrade gracefully, so removing it from the Worker is low-risk. The database, auth backend, and image storage stay on Supabase and are explicitly out of scope.</p>
+    </header>
+
+    <nav class="toc"><h4>Contents</h4><div id="toc-list"></div></nav>
+
+    <!-- ══ DOC — fill section cards; numbering + TOC auto-generate ══ -->
+    <main id="doc">
+
+      <section class="card">
+        <h2>Current state (grounded in the code)</h2>
+        <p>Quick is a monorepo with three parts: <code>website/</code> (Vite + React 18 SPA), <code>server/</code> (Express 5 + TypeScript, compiled with <code>tsc</code> to <code>server/dist/</code>), and <code>tools/</code> (local <code>ts-node</code> maintenance scripts). <code>start-dev.sh</code> runs both halves locally on ports 5173 (Vite) and 3001 (Express).</p>
+        <p><strong>Two Render services, two origins.</strong> The frontend is a Render static site served at <code>quickstory.ai</code>; the API is a Render Node service at <code>api.quickstory.ai</code>. Because each service builds the frontend independently with different <code>VITE_*</code> env vars, their content-hashed bundle filenames diverge — so <code>server/index.ts</code> carries a workaround (<code>getCdnIndexHtml</code>, <code>cachedIndexHtml</code>, <code>INDEX_CACHE_TTL_MS</code>) that fetches and caches the CDN's <code>index.html</code> at runtime so browsers always request assets that actually exist on the CDN. This whole mechanism exists only because the two services are separate.</p>
+        <p><strong>The OG/SEO hot path runs through Express.</strong> <code>server/index.ts</code> registers <code>sitemapRoutes</code> (<code>server/sitemap.ts</code> — <code>robots.txt</code>, <code>sitemap.xml</code> + per-language story/lesson/tag sitemaps) and <code>seoPrerender</code> (<code>server/seo_prerender.ts</code>), then a catch-all <code>app.get(/.*/)</code> that, for <code>/…/story/:slug</code> and <code>/…/lesson/:slug</code> paths, looks up the creation in Supabase and injects OG/Twitter meta tags via <code>buildPageHtml</code>. Image URLs for OG are rewritten to Supabase on-the-fly transforms by <code>toOgImageUrl</code> (<code>server/image_utils.ts</code>). A Render rewrite rule (<code>/*/story/*</code> → <code>https://api.quickstory.ai/*/story/*</code>) proxies SPA HTML paths to the API so bots get real meta tags; <code>design/og_resolver_design.md</code> documents a Render wildcard bug that this rewrite triggers and works around with a loose regex.</p>
+        <p><strong>API surface.</strong> <code>server/index.ts</code> mounts <code>discoveryRoutes</code>, <code>generatorRoutes</code>, <code>storyRoutes</code>, <code>lessonRoutes</code>, <code>userRoutes</code> (all in <code>server/routes.ts</code>), <code>authRoutes</code> (<code>server/auth.ts</code>), <code>adminRoutes</code> (<code>server/admin.ts</code>), and <code>testRunnerRoutes</code> (<code>server/tests/runner.ts</code>, backing the in-app tests page), plus <code>/health</code>. Middleware: <code>cors</code> (custom origin allowlist derived from <code>CLIENT_URL</code> + localhost), <code>express.json</code>, <code>cookie-parser</code>, and an <code>X-Robots-Tag</code> header.</p>
+        <p><strong>Auth.</strong> <code>server/auth.ts</code> verifies Google ID tokens (<code>google-auth-library</code>), issues a signed JWT (<code>jsonwebtoken</code>) in an httpOnly cookie, and upserts a <code>profiles</code> row in Supabase. The cookie domain is derived from <code>CLIENT_URL</code> as <code>.quickstory.ai</code> so the token is shared between <code>quickstory.ai</code> and <code>api.quickstory.ai</code>. Admin gating is by email allowlist (<code>APPROVED_EMAILS</code> in <code>server/config.ts</code>).</p>
+        <p><strong><code>sharp</code> — the one native dependency.</strong> It appears in <code>server/routes.ts</code> (~line 398, single story/lesson image generation) and <code>server/generator.ts</code> (~line 418, batch generation). Both lazily <code>require('sharp')</code> inside a <code>try/catch</code> to resize the DALL·E output to a ≤500KB WebP before uploading to the Supabase <code>creations</code> bucket. Critically, <strong>both already fall back gracefully</strong>: if <code>sharp</code> throws, <code>isWebp</code> stays <code>false</code> and the raw PNG is uploaded instead. <code>sharp</code> also appears in <code>tools/fix_missing_images.ts</code>, which runs locally via <code>ts-node</code>, never on the server.</p>
+        <p><strong>Persistence &amp; external services (unchanged by this plan).</strong> Supabase provides Postgres (<code>creations</code>, <code>stories</code>, <code>lessons</code>, <code>tags</code>, <code>profiles</code>, …), storage of <code>profiles</code>, the <code>creations</code> storage bucket, and on-the-fly image transforms (<code>/storage/v1/render/image/…</code>, already used by <code>toOgImageUrl</code>). OpenAI provides text (<code>gpt-4o-mini</code>) and images (<code>dall-e-3</code>). These are reached over HTTPS and are hosting-agnostic.</p>
+        <p><strong>Deploy.</strong> <code>tools/deploy.sh</code> pushes <code>main</code>, then fast-forwards and pushes a <code>prod</code> branch; Render auto-deploys both services from <code>prod</code>.</p>
+        <p><strong>Environment variables in play:</strong> <code>CLIENT_URL</code>, <code>FRONTEND_DIST_PATH</code>, <code>PORT</code>, <code>NODE_ENV</code>, <code>VITE_SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code>, <code>OPENAI_API_KEY</code>, <code>GOOGLE_CLIENT_ID</code>, <code>JWT_SECRET</code>, <code>VITE_BASE_URL</code>.</p>
+      </section>
+
+      <section class="card">
+        <h2>Goals</h2>
+        <ol>
+          <li><strong>One origin, one deployment.</strong> Serve the SPA and the API from a single Cloudflare Worker on <code>quickstory.ai</code>, retiring the <code>api.quickstory.ai</code> split.</li>
+          <li><strong>Consolidate onto Cloudflare.</strong> DNS, CDN, and compute in one Cloudflare account — the primary motivation for the move.</li>
+          <li><strong>Preserve behavior exactly.</strong> SEO sitemaps, OG/Twitter meta injection, Google login, the admin generator, and the in-app tests page all keep working, verified before cutover.</li>
+          <li><strong>Delete accidental complexity.</strong> Remove the CDN-<code>index.html</code> proxy hack, the asset-hash mismatch, the Render rewrite rule, and the Render wildcard workaround.</li>
+          <li><strong>Keep the Express codebase.</strong> Reuse the existing Express app via the Node-compat shim rather than rewriting routes, to minimize risk and diff size.</li>
+          <li><strong>No data migration.</strong> Supabase stays authoritative; nothing in Postgres or Storage moves.</li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h2>Non-goals</h2>
+        <ul>
+          <li><strong>Moving Supabase.</strong> Postgres, auth data, and the <code>creations</code> storage bucket stay on Supabase. No D1/R2 migration in this plan.</li>
+          <li><strong>Rewriting Express to Hono/itty-router.</strong> The app is wrapped, not rewritten. A future rewrite can be its own plan.</li>
+          <li><strong>Changing the frontend framework or build.</strong> Vite + React stays; only where the build output is <em>served</em> changes.</li>
+          <li><strong>Re-architecting the OG resolver registry.</strong> <code>design/og_resolver_design.md</code>'s Part 1 (the Render rewrite changes) becomes obsolete under one origin — there is no cross-origin proxy to configure once frontend and API share a Worker (see Open decision 5 for the full why). Its Part 2 (the resolver-registry refactor) is a hosting-independent code-organization improvement, still valid but optional and tracked separately.</li>
+          <li><strong>Adding Cloudflare Queues/Cron for batch generation</strong> beyond noting it as a risk mitigation.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Target architecture</h2>
+        <p>One Worker, one origin. Cloudflare <strong>Static Assets</strong> serves everything in <code>website/dist</code> (hashed JS/CSS, images, <code>favicon.png</code>) directly from the edge for free. The Worker runs only where it must:</p>
+        <ul>
+          <li><code>run_worker_first</code> is set for <code>/api/*</code>, the SEO file routes (<code>/robots.txt</code>, <code>/sitemap*.xml</code>), and the SPA HTML paths that need OG injection (<code>/:lang/story/*</code>, <code>/:lang/lesson/*</code>) — these are handed to the Express app.</li>
+          <li>Every other path is served from Static Assets, with <code>not_found_handling: "single-page-application"</code> returning <code>index.html</code> for unmatched client-side routes.</li>
+        </ul>
+        <p>The Express app is imported into the Worker and wrapped with <strong><code>httpServerHandler</code></strong> from the <code>cloudflare:workers</code> module (no <code>app.listen()</code> in the Worker path; that moves to a dev-only entry). <code>express.json()</code>, <code>cors</code>, and <code>cookie-parser</code> run unchanged under <code>nodejs_compat</code> — all three are confirmed-compatible. The Worker exposes an <code>ASSETS</code> binding so the OG catch-all can read the built <code>index.html</code> from the edge (<code>env.ASSETS.fetch</code>) and inject meta tags into it, replacing the runtime CDN fetch.</p>
+        <pre><code>              ┌───────────────── quickstory.ai (one Cloudflare zone) ─────────────────┐
+  Browser ─▶  │  Cloudflare edge                                                       │
+  / Bot       │    ├─ /assets/*, /images/*, hashed bundles ─▶ Static Assets (free)     │
+              │    ├─ /:lang/story/:slug , /:lang/lesson/:slug ─▶ Worker ─▶ OG catch-all│
+              │    │                             (reads index.html via ASSETS, injects) │
+              │    ├─ /api/* , /robots.txt , /sitemap*.xml ─▶ Worker ─▶ Express routes  │
+              │    └─ any other path (SPA route) ─▶ Static Assets → index.html fallback │
+              └───────────────────────────────┬────────────────────────────────────────┘
+                                               ▼
+                       Supabase (Postgres · Auth data · Storage · image transforms)
+                       OpenAI (gpt-4o-mini · dall-e-3)</code></pre>
+        <p><strong>What this collapses.</strong> Same origin means: the <code>getCdnIndexHtml</code>/<code>cachedIndexHtml</code> proxy is deleted (the Worker reads its own co-located <code>index.html</code>); the asset-hash mismatch cannot occur (one build, one deploy); <code>cors</code> simplifies to same-origin (browser calls to <code>/api/*</code> are first-party); and the cookie no longer needs to span two subdomains.</p>
+      </section>
+
+      <section class="card">
+        <h2>Backend changes — Express on a Worker</h2>
+        <p>The Express app already exports <code>app</code> (<code>export default app</code> in <code>server/index.ts</code>) and only calls <code>app.listen()</code> when <code>NODE_ENV !== "test"</code>. Restructure so the listen call is isolated and the app is Worker-importable.</p>
+        <table>
+          <thead><tr><th>Change</th><th>File</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr><td>Split entry</td><td><code>server/index.ts</code></td><td>Export the configured <code>app</code>; move <code>app.listen(PORT)</code> into a new <code>server/dev.ts</code> used only by <code>npm run dev</code> locally.</td></tr>
+            <tr><td>Add Worker entry</td><td>new <code>server/worker.ts</code></td><td>Import <code>./env-shim</code> first, expose the assets binding as <code>globalThis.__ASSETS__</code>, <code>import app from "./index"</code>, <code>app.listen(PORT)</code>, then <code>export default httpServerHandler({ port: PORT })</code>. <strong>Correct imports:</strong> <code>httpServerHandler</code> from <code>cloudflare:node</code>, <code>env</code> from <code>cloudflare:workers</code>.</td></tr>
+            <tr><td>Add env shim</td><td>new <code>server/env-shim.ts</code></td><td>Copies string-valued Worker bindings onto <code>process.env</code> (Workers does <strong>not</strong> populate <code>process.env</code> automatically), so existing <code>process.env.*</code> reads keep working. Imported before <code>./index</code>.</td></tr>
+            <tr><td>Delete CDN proxy</td><td><code>server/index.ts</code></td><td>Remove <code>getCdnIndexHtml</code>, <code>cachedIndexHtml</code>, <code>cacheTimestamp</code>, <code>INDEX_CACHE_TTL_MS</code>.</td></tr>
+            <tr><td>Rework catch-all</td><td><code>server/index.ts</code></td><td>Fetch base HTML from the <code>ASSETS</code> binding instead of the remote CDN, then run existing <code>buildPageHtml</code>. Drop the <code>express.static(distPath)</code> block and <code>distCandidates</code> logic.</td></tr>
+            <tr><td>Remove <code>sharp</code></td><td><code>server/routes.ts</code>, <code>server/generator.ts</code></td><td>See Image processing section.</td></tr>
+            <tr><td>Simplify CORS (optional)</td><td><code>server/index.ts</code></td><td>Same-origin calls no longer need the subdomain allowlist; keep for any server-to-server callers, or trim to <code>CLIENT_URL</code>.</td></tr>
+            <tr><td>Cookie domain</td><td><code>server/auth.ts</code></td><td>With one origin, <code>.quickstory.ai</code> still works; can simplify to host-only. Verify Google login after cutover.</td></tr>
+          </tbody>
+        </table>
+        <p><strong>Env/secrets.</strong> The app reads <code>process.env.*</code>. In the Worker, put non-secret values (<code>CLIENT_URL</code>, <code>VITE_SUPABASE_URL</code>, <code>NODE_ENV</code>) in <code>[vars]</code> and secrets (<code>SUPABASE_SERVICE_ROLE_KEY</code>, <code>OPENAI_API_KEY</code>, <code>JWT_SECRET</code>, <code>GOOGLE_CLIENT_ID</code>) via <code>wrangler secret put</code>. <strong>Confirmed during implementation:</strong> Workers exposes these on the <code>env</code> object from <code>cloudflare:workers</code>, <strong>not</strong> on <code>process.env</code> — so <code>server/env-shim.ts</code> copies them across before <code>./index</code> is imported. <code>server/config.ts</code>'s <code>dotenv.config()</code> stays a harmless no-op in the Worker (still used by local dev). <code>FRONTEND_DIST_PATH</code> and <code>PORT</code> are no longer needed on the Worker.</p>
+        <h3>wrangler.jsonc (sketch)</h3>
+        <pre><code>{
+  "name": "quick",
+  "main": "server/worker.ts",
+  "compatibility_date": "2025-05-01",        // bump to deploy date; node:http needs a recent date
+  "compatibility_flags": ["nodejs_compat"],  // v2 behavior is on by default at recent dates
+  "assets": {
+    "directory": "./website/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/robots.txt", "/sitemap.xml", "/sitemap-*.xml", "/*/story/*", "/*/lesson/*"]
+  },
+  "vars": { "NODE_ENV": "production", "CLIENT_URL": "https://quickstory.ai" }
+}</code></pre>
+        <p><em>As-built note:</em> the OG catch-all in <code>server/index.ts</code> reads <code>index.html</code> from the <code>ASSETS</code> binding, which <code>server/worker.ts</code> hands over via <code>globalThis.__ASSETS__</code> (kept off a static <code>cloudflare:workers</code> import so <code>server/index.ts</code> still runs under local <code>nodemon</code>, falling back to <code>website/dist/index.html</code> on disk). Worker-only files (<code>worker.ts</code>, <code>env-shim.ts</code>) are excluded from the server <code>tsc</code> build in <code>server/tsconfig.json</code> — wrangler/esbuild compiles them.</p>
+      </section>
+
+      <section class="card">
+        <h2>Frontend changes — serving the Vite build</h2>
+        <p>Almost nothing changes in the app; what changes is where <code>website/dist</code> is served from. The Vite build already emits a standard SPA. <code>website/vite.config.ts</code> currently sets <code>base</code> and uses <code>VITE_BASE_URL</code> to make assets load from the CDN host when the API build embeds them — under one origin that indirection is unnecessary; assets and API share a host, so <code>base: '/'</code> is correct and the per-service <code>VITE_BASE_URL</code> juggling goes away.</p>
+        <p>The Vite dev proxy in <code>website/vite.config.ts</code> (forwarding <code>/api</code> and the sitemap routes to <code>localhost:3001</code>) stays as-is for local development. Production no longer proxies — the Worker owns both. Build order for deploy: <code>cd website &amp;&amp; vite build</code> produces <code>website/dist</code>, then <code>wrangler deploy</code> uploads the Worker + the <code>dist</code> assets together.</p>
+      </section>
+
+      <section class="card">
+        <h2>Image processing without sharp</h2>
+        <p><code>sharp</code> cannot run in a Worker. It is used only to shrink DALL·E output before upload, and only in admin-triggered generation. Because both call sites already upload the raw PNG when <code>sharp</code> is unavailable, the safe default is to <strong>remove the <code>sharp</code> block from the Worker path and lean on Supabase's on-the-fly transforms for delivery</strong> — the same transform mechanism <code>toOgImageUrl</code> already uses.</p>
+        <table>
+          <thead><tr><th>Aspect</th><th>Approach</th></tr></thead>
+          <tbody>
+            <tr><td>Stored original</td><td>Upload the DALL·E PNG (or a light re-encode) straight to the <code>creations</code> bucket. Larger at rest, but Supabase Storage is already the store and cost impact is small at this volume.</td></tr>
+            <tr><td>Display &amp; OG delivery</td><td>Serve via Supabase render-transform URLs with <code>width</code>/<code>quality</code> params (generalize <code>toOgImageUrl</code> into a <code>toDisplayImageUrl(url, {width})</code> helper), so cards and social previews stay small on the wire.</td></tr>
+            <tr><td>Optional tighter storage</td><td>If storing 2–4MB originals is undesirable, resize with <strong>Cloudflare Images</strong> (a fetch-based transform, no native binary) at upload time.</td></tr>
+            <tr><td>Backfill / re-optimize</td><td>The existing <code>tools/fix_missing_images.ts</code> runs <strong>locally via <code>ts-node</code>, keeping <code>sharp</code></strong> — it never runs on the Worker, so no change is needed there.</td></tr>
+          </tbody>
+        </table>
+        <p>Net code change: delete the two <code>require('sharp')</code> blocks, keep the upload logic, and route all image display through the transform helper. <code>sharp</code> moves out of <code>server/</code>'s runtime <code>dependencies</code>; it can remain a root/tools devDependency for the local scripts.</p>
+      </section>
+
+      <section class="card">
+        <h2>DNS, domains &amp; cutover safety</h2>
+        <p>The DNS/zone move is deliberately the <strong>last</strong> step, after everything is verified working (confirmed in review — Open decision 6). Sequence:</p>
+        <ul>
+          <li>Bring the Worker up on its <code>*.workers.dev</code> URL and run the full verification checklist there, while Render still serves production and <code>quickstory.ai</code> DNS stays exactly where it is. All staging verification happens on <code>workers.dev</code> — no DNS change needed to test.</li>
+          <li>Only once the checklist passes, <strong>as the final cutover action</strong>, move the <code>quickstory.ai</code> zone to Cloudflare DNS and point the apex/<code>www</code> at the Worker via a Workers <strong>custom domain / route</strong>. This also unlocks Cloudflare's CDN/WAF for the whole site.</li>
+          <li>Point <code>api.quickstory.ai</code> at the same Worker (or a 301) for a deprecation window so any hardcoded/external references keep working, then retire it.</li>
+          <li>Keep Render running until a full day of production traffic looks clean; decommission last. Because DNS moved last, rollback before that point is just leaving DNS untouched; rollback after is a DNS/route flip back.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Integration checklist (files to touch)</h2>
+        <table>
+          <thead><tr><th>File</th><th>Change</th></tr></thead>
+          <tbody>
+            <tr><td><code>wrangler.jsonc</code> (new, repo root)</td><td>Worker config: <code>main</code>, <code>compatibility_date</code>, <code>nodejs_compat_v2</code>, <code>assets</code> binding with <code>run_worker_first</code> + SPA fallback, <code>vars</code>.</td></tr>
+            <tr><td><code>server/worker.ts</code> (new)</td><td>Worker entry: wrap <code>app</code> with <code>httpServerHandler</code>; optional <code>process.env</code> shim.</td></tr>
+            <tr><td><code>server/dev.ts</code> (new)</td><td>Local-only <code>app.listen(PORT)</code>; wired to <code>npm run dev</code>.</td></tr>
+            <tr><td><code>server/index.ts</code></td><td>Remove <code>app.listen</code>; delete <code>getCdnIndexHtml</code>/cache; replace CDN fetch with <code>ASSETS</code> read in the OG catch-all; drop <code>express.static</code>/<code>distCandidates</code>; optionally trim CORS.</td></tr>
+            <tr><td><code>server/routes.ts</code> (~L396–417)</td><td>Delete the <code>sharp</code> resize block; upload PNG; keep Supabase upload + DB update.</td></tr>
+            <tr><td><code>server/generator.ts</code> (~L415–437)</td><td>Same <code>sharp</code> removal for batch generation.</td></tr>
+            <tr><td><code>server/image_utils.ts</code></td><td>Generalize <code>toOgImageUrl</code> → shared display/OG transform helper with <code>width</code>/<code>quality</code>.</td></tr>
+            <tr><td><code>server/auth.ts</code></td><td>Verify/adjust <code>COOKIE_DOMAIN</code> for single origin.</td></tr>
+            <tr><td><code>website/vite.config.ts</code></td><td>Set <code>base: '/'</code>; retire <code>VITE_BASE_URL</code> indirection (keep dev proxy).</td></tr>
+            <tr><td><code>server/package.json</code></td><td>Move <code>sharp</code> out of runtime deps; add <code>wrangler</code> and <code>@cloudflare/workers-types</code>; adjust <code>dev</code>/<code>build</code>/<code>start</code> scripts.</td></tr>
+            <tr><td><code>package.json</code> (root)</td><td>Replace <code>deploy</code> → <code>vite build &amp;&amp; wrangler deploy</code> (or wire Cloudflare Workers Builds to the <code>prod</code> branch).</td></tr>
+            <tr><td><code>tools/deploy.sh</code></td><td>Repoint from the Render <code>prod</code>-branch flow to <code>wrangler deploy</code> / Workers Builds; or retire.</td></tr>
+            <tr><td><code>README.md</code> / <code>CLAUDE.md</code></td><td>Update run/deploy docs to the single-Worker flow.</td></tr>
+            <tr><td><code>website/.env</code></td><td>Split into Worker <code>[vars]</code> + <code>wrangler secret</code>; document the mapping.</td></tr>
+          </tbody>
+        </table>
+        <p>Frontend feature code, translations, the tests page, sitemap logic, and the Supabase schema are untouched.</p>
+      </section>
+
+      <section class="card">
+        <h2>Cutover verification checklist</h2>
+        <p>Run against the staging Worker before flipping <code>quickstory.ai</code>, then again on production immediately after:</p>
+        <ol>
+          <li><strong>SPA loads</strong> at <code>/</code>, hashed assets 200 from Static Assets, deep-link refresh on a client route returns <code>index.html</code>.</li>
+          <li><strong>API</strong> — <code>/health</code>, a <code>discovery</code> fetch, and an authenticated <code>/api/me</code> call succeed same-origin (no CORS error).</li>
+          <li><strong>Google login</strong> — full sign-in sets the JWT cookie, <code>/auth/me</code> returns the user, admin email sees <code>isAdmin: true</code>, logout clears it.</li>
+          <li><strong>OG injection</strong> — <code>curl</code> a <code>/he/story/:slug</code> and <code>/en/lesson/:slug</code> and confirm injected <code>&lt;title&gt;</code>/<code>og:*</code>/<code>twitter:*</code> tags and a Supabase-transform <code>og:image</code>; check a WhatsApp/X preview.</li>
+          <li><strong>SEO files</strong> — <code>/robots.txt</code>, <code>/sitemap.xml</code>, and each per-language <code>sitemap-*-{en,he}.xml</code> return valid XML; legacy unprefixed routes still 301.</li>
+          <li><strong>Generator</strong> — generate one story image end-to-end; confirm it lands in the <code>creations</code> bucket and <code>creations.image_url</code> updates; confirm display + OG transform URLs render.</li>
+          <li><strong>Tests page</strong> — the in-app runner (<code>/api/tests</code>) passes.</li>
+          <li><strong>Old origin</strong> — <code>api.quickstory.ai</code> still resolves during the deprecation window.</li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h2>Risks &amp; mitigations</h2>
+        <p><strong>Express 5 / middleware gaps under <code>nodejs_compat</code>.</strong> → <code>express.json</code>, <code>cors</code>, and <code>cookie-parser</code> are confirmed-working; pin <code>compatibility_date</code> and <code>nodejs_compat_v2</code>, and smoke-test the full stack on staging (the local <code>supertest</code> suite still exercises <code>app</code> directly). Keep the <code>server/dev.ts</code> <code>app.listen</code> path so local Node behavior is unchanged.</p>
+        <p><strong>Worker CPU/time limits on generation.</strong> → DALL·E calls are long wall-clock but low CPU (mostly awaiting I/O), which Workers tolerate; still, batch generation (<code>BATCH_CONCURRENCY = 20</code> in <code>server/config.ts</code>) is the riskiest path. Mitigation: verify a single generation on staging first; if batch exceeds limits, run it as the existing local <code>tools</code> script or move it behind a Cloudflare Queue as a follow-up.</p>
+        <p><strong>Larger images at rest after dropping <code>sharp</code>.</strong> → Deliver via Supabase transforms (already in use), optionally add Cloudflare Images, and run the local re-optimize tool once as backfill. Visual output is unchanged because delivery is transformed.</p>
+        <p><strong>SEO/OG regression during cutover.</strong> → The OG path is exercised in the checklist against staging before flip; sitemaps and 301s are preserved; <code>X-Robots-Tag: index, follow</code> header stays.</p>
+        <p><strong>Auth cookie breakage at origin change.</strong> → Test the full Google flow on staging; keep <code>.quickstory.ai</code> cookie domain through cutover; only simplify to host-only after login is verified.</p>
+        <p><strong><code>process.env</code> timing.</strong> → <code>server/config.ts</code> runs <code>dotenv.config()</code> and reads env at import; add the <code>Object.assign(process.env, env)</code> shim in <code>server/worker.ts</code> before importing the app if any value reads empty in the Worker.</p>
+        <p><strong>Rollback.</strong> → Render stays live and un-decommissioned until a full day of clean Cloudflare traffic; reverting is a DNS/route flip back.</p>
+      </section>
+
+      <section class="card">
+        <h2>Open decisions (defaults chosen — confirm or redirect)</h2>
+        <ol>
+          <li><strong>Image storage strategy.</strong> <em>Default:</em> drop <code>sharp</code>, store the DALL·E PNG, and deliver through Supabase transforms. <em>Alternative:</em> add Cloudflare Images to keep ≤500KB WebP originals. → Confirm the default, or opt into Cloudflare Images.</li>
+          <li><strong>Deploy mechanism.</strong> <em>Default:</em> Cloudflare <strong>Workers Builds</strong> watching the existing <code>prod</code> branch (mirrors today's Git-driven Render deploy). <em>Alternative:</em> manual <code>wrangler deploy</code> from CI. → Confirm.</li>
+          <li><strong><code>api.quickstory.ai</code> fate.</strong> <em>Default:</em> keep it pointed at the same Worker for a deprecation window, then retire. → Confirm the window length, or drop it immediately.</li>
+          <li><strong>CORS allowlist.</strong> <em>Default:</em> keep the existing <code>CLIENT_URL</code>-derived allowlist for any non-browser callers. <em>Alternative:</em> trim to same-origin only. → Confirm whether any external clients hit the API.</li>
+          <li><strong>OG resolver refactor.</strong> <em>Context (asked in review):</em> today, story/lesson pages need real <code>&lt;title&gt;</code>/<code>og:*</code> tags for social/SEO bots, which the SPA can't provide client-side (bots don't run JS), so Express injects them in <code>buildPageHtml</code>. On Render the static site and API are <em>different origins</em>, so a Render rewrite rule proxies <code>/*/story/*</code> and <code>/*/lesson/*</code> over to <code>api.quickstory.ai</code> to reach that injector. <code>design/og_resolver_design.md</code> proposed two things: <strong>Part 1</strong> (Render-specific) collapsed the per-type rewrites into one catch-all and worked around a Render wildcard bug that mangled <code>/he/story/slug</code> into <code>/slug/story/slug</code> (the reason <code>server/index.ts</code> uses a loose regex today); <strong>Part 2</strong> was an Express resolver registry so new page types don't require editing <code>index.ts</code>. <em>Why Part 1 is obsolete after this migration:</em> with one Worker on one origin there is <strong>no cross-origin proxy at all</strong> — no <code>api.quickstory.ai</code> to rewrite to and no Render rewrite layer. <code>run_worker_first</code> hands the story/lesson HTML paths straight to the same-origin Express catch-all, the path arrives clean, and the wildcard bug and its loose-regex workaround simply disappear (the precise <code>^/([a-z]{2})/story/…</code> regex can be restored). So Part 1 has nothing left to configure. <em>Default:</em> defer Part 2 (a hosting-independent code cleanup) to its own change; this plan just drops the now-moot Part 1. → Confirm defer vs. fold Part 2 in while touching this code.</li>
+          <li><strong>DNS move.</strong> ✅ <em>Resolved (round 1):</em> move the full <code>quickstory.ai</code> zone to Cloudflare for consolidation, but sequence it as the <strong>last</strong> step — verify everything on <code>workers.dev</code> first, then move DNS as the final cutover action (reflected in the DNS &amp; cutover section).</li>
+        </ol>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="cmt-pop"><button type="button">💬 Comment</button></div>
+  <div id="cmt-composer">
+    <div class="q"></div>
+    <textarea placeholder="Your comment…"></textarea>
+    <div class="row"><button class="cancel" type="button">Cancel</button><button class="save" type="button">Save</button></div>
+  </div>
+
+  <button id="dock-toggle" type="button">Comments <span class="badge">0</span></button>
+  <aside id="dock">
+    <header><h3>Review comments</h3><button class="x" type="button">×</button></header>
+    <div class="list"><div class="empty">Select any text in the doc and click 💬 Comment.</div></div>
+    <div class="actions">
+      <button class="primary" id="copy-btn" type="button">Copy for Claude</button>
+      <button class="ghost" id="dl-btn" type="button">Download .md</button>
+    </div>
+  </aside>
+  <div id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  // Theme: light by default; dark is opt-in and remembered.
+  (function(){
+    var TK="dd-theme", root=document.documentElement, btn=document.getElementById("theme-toggle");
+    function apply(t){ root.setAttribute("data-theme",t); if(btn) btn.textContent = t==="dark" ? "☀️ Light" : "🌙 Dark"; }
+    var saved=null; try{ saved=localStorage.getItem(TK); }catch(e){}
+    apply(saved==="dark" ? "dark" : "light");
+    if(btn) btn.addEventListener("click", function(){
+      var next = root.getAttribute("data-theme")==="dark" ? "light" : "dark";
+      apply(next); try{ localStorage.setItem(TK,next); }catch(e){}
+    });
+  })();
+
+  var SLUG = "cloudflare-migration";                 // storage key + comments filename
+  var DOCTITLE = document.title;
+  var KEY = "dd-comments:" + SLUG;
+  var comments = load();
+
+  // ---- auto-number sections + build TOC ----
+  var tocList = document.getElementById("toc-list");
+  var sections = Array.prototype.slice.call(document.querySelectorAll("#doc > .card"));
+  sections.forEach(function(sec, i){
+    var h2 = sec.querySelector("h2"); if(!h2) return;
+    var n = i + 1;
+    if(!sec.id) sec.id = "s" + n;
+    if(!h2.querySelector(".n")){
+      var s = document.createElement("span"); s.className = "n"; s.textContent = n + ".";
+      h2.insertBefore(s, h2.firstChild);
+    }
+    var a = document.createElement("a");
+    a.href = "#" + sec.id;
+    a.innerHTML = '<span class="n">' + n + '</span>' + h2.textContent.replace(/^\s*\d+\.\s*/, "");
+    tocList.appendChild(a);
+  });
+
+  // scrollspy
+  var links = Array.prototype.slice.call(tocList.querySelectorAll("a"));
+  var spy = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(l){ l.classList.toggle("active", l.getAttribute("href") === "#" + e.target.id); });
+      }
+    });
+  }, {rootMargin:"-10% 0px -80% 0px"});
+  sections.forEach(function(s){ spy.observe(s); });
+
+  // ---- selection → popup ----
+  var pop = document.getElementById("cmt-pop");
+  var popBtn = pop.querySelector("button");
+  var composer = document.getElementById("cmt-composer");
+  var pending = null;
+
+  document.addEventListener("mouseup", function(e){
+    if(composer.contains(e.target) || pop.contains(e.target)) return;
+    setTimeout(function(){
+      var sel = window.getSelection();
+      if(!sel || sel.isCollapsed){ hidePop(); return; }
+      var text = String(sel).trim();
+      if(text.length < 3){ hidePop(); return; }
+      var anchor = sel.anchorNode;
+      var card = anchor && (anchor.nodeType===1 ? anchor : anchor.parentElement);
+      card = card && card.closest ? card.closest("#doc > .card") : null;
+      if(!card){ hidePop(); return; }
+      var rect = sel.getRangeAt(0).getBoundingClientRect();
+      var secH2 = card.querySelector("h2");
+      pending = { quote:text, section: secH2 ? secH2.textContent.trim() : "", sectionId: card.id, range: sel.getRangeAt(0).cloneRange() };
+      pop.style.left = (window.scrollX + rect.left + rect.width/2) + "px";
+      pop.style.top  = (window.scrollY + rect.top - 8) + "px";
+      pop.style.display = "block";
+    }, 1);
+  });
+  function hidePop(){ pop.style.display = "none"; }
+
+  function openComposer(){
+    if(!pending) return;
+    var sel = window.getSelection();
+    var rect = sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : {left:innerWidth/2, top:innerHeight/2, width:0, height:0};
+    composer.querySelector(".q").textContent = "“" + pending.quote + "”";
+    composer.querySelector("textarea").value = "";
+    var left = Math.min(window.scrollX + rect.left, window.scrollX + innerWidth - 340);
+    composer.style.left = Math.max(window.scrollX + 12, left) + "px";
+    composer.style.top  = (window.scrollY + rect.top + rect.height + 8) + "px";
+    composer.style.display = "block";
+    hidePop();
+    composer.querySelector("textarea").focus();
+  }
+  popBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+  popBtn.addEventListener("click", openComposer);
+
+  // Select text, then just start typing → composer opens seeded with that keystroke.
+  document.addEventListener("keydown", function(e){
+    if(composer.style.display === "block") return;          // already composing → normal typing
+    if(!pending || pop.style.display !== "block") return;   // only right after a fresh selection
+    if(e.metaKey || e.ctrlKey || e.altKey) return;          // ignore shortcuts
+    if(e.key.length !== 1) return;                          // printable characters only
+    e.preventDefault();
+    openComposer();
+    var ta = composer.querySelector("textarea");
+    ta.value = e.key;
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  });
+
+  composer.querySelector(".cancel").addEventListener("click", function(){ composer.style.display="none"; pending=null; });
+  function saveComment(){
+    var body = composer.querySelector("textarea").value.trim();
+    if(!body || !pending){ composer.style.display="none"; return; }
+    var c = { id:"c"+Date.now(), quote:pending.quote, section:pending.section, sectionId:pending.sectionId, body:body, ts:Date.now() };
+    comments.push(c); save();
+    if(!(pending.range && wrapRange(pending.range, c.id, c.body))) highlightSaved(c);
+    render();
+    composer.style.display="none"; pending=null;
+    window.getSelection().removeAllRanges();
+    toast("Comment added");
+  }
+  composer.querySelector(".save").addEventListener("click", saveComment);
+  // Cmd/Ctrl+Enter saves the comment you're typing.
+  composer.querySelector("textarea").addEventListener("keydown", function(e){
+    if(e.key==="Enter" && (e.metaKey || e.ctrlKey)){ e.preventDefault(); saveComment(); }
+  });
+  document.addEventListener("keydown", function(e){ if(e.key==="Escape"){ composer.style.display="none"; hidePop(); } });
+
+  // ---- dock ----
+  var dock = document.getElementById("dock");
+  var toggle = document.getElementById("dock-toggle");
+  var listEl = dock.querySelector(".list");
+  toggle.addEventListener("click", function(){ dock.classList.toggle("open"); });
+  dock.querySelector(".x").addEventListener("click", function(){ dock.classList.remove("open"); });
+
+  function render(){
+    toggle.querySelector(".badge").textContent = comments.length;
+    if(!comments.length){ listEl.innerHTML = '<div class="empty">Select any text in the doc and click 💬 Comment.</div>'; return; }
+    listEl.innerHTML = "";
+    comments.slice().sort(function(a,b){return a.ts-b.ts;}).forEach(function(c){
+      var d = document.createElement("div"); d.className="cmt-item"; d.setAttribute("data-item", c.id);
+      d.innerHTML = '<button class="del" title="Delete">✕ delete</button>'
+        + '<div class="sec">'+ escapeHtml(c.section.replace(/^\s*\d+\.\s*/,"")) +'</div>'
+        + '<div class="q">“'+ escapeHtml(c.quote) +'”</div>'
+        + '<div class="body">'+ escapeHtml(c.body) +'</div>';
+      d.querySelector(".del").addEventListener("click", function(ev){
+        ev.stopPropagation(); unwrapMark(c.id);
+        comments = comments.filter(function(x){return x.id!==c.id;}); save(); render(); toast("Deleted");
+      });
+      d.addEventListener("click", function(){ scrollToMark(c.id); });
+      listEl.appendChild(d);
+    });
+  }
+
+  // ---- export ----
+  function toMarkdown(){
+    var lines = ["# Comments on " + DOCTITLE + " — review round 1", ""];
+    if(!comments.length){ lines.push("_No comments._"); return lines.join("\n"); }
+    var bySec = {};
+    comments.slice().sort(function(a,b){return a.ts-b.ts;}).forEach(function(c){
+      (bySec[c.section] = bySec[c.section] || []).push(c);
+    });
+    Object.keys(bySec).forEach(function(sec){
+      lines.push("## " + sec.replace(/^\s*\d+\.\s*/,""));
+      bySec[sec].forEach(function(c){
+        lines.push('- re: "' + c.quote + '"');
+        lines.push("  " + c.body.replace(/\n/g,"\n  "));
+      });
+      lines.push("");
+    });
+    return lines.join("\n");
+  }
+  document.getElementById("copy-btn").addEventListener("click", function(){
+    var md = toMarkdown();
+    navigator.clipboard.writeText(md).then(function(){ toast("Copied "+comments.length+" comment(s)"); },
+      function(){ fallbackCopy(md); toast("Copied"); });
+  });
+  document.getElementById("dl-btn").addEventListener("click", function(){
+    var blob = new Blob([toMarkdown()], {type:"text/markdown"});
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = SLUG + ".comments.md"; a.click(); URL.revokeObjectURL(a.href);
+  });
+
+  // ---- utils ----
+  function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ return []; } }
+  function save(){ try{ localStorage.setItem(KEY, JSON.stringify(comments)); }catch(e){} }
+  function escapeHtml(s){ return s.replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+  function fallbackCopy(t){ var ta=document.createElement("textarea"); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");}catch(e){} ta.remove(); }
+  var toastEl = document.getElementById("toast"), toastT;
+  function toast(m){ toastEl.textContent=m; toastEl.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(function(){toastEl.classList.remove("show");},1900); }
+
+  // ---- inline highlights: comments also appear in the doc body, not only the dock ----
+  function wrapRange(range, id, body){
+    try{
+      var m = document.createElement("mark");
+      m.className = "cmt"; m.setAttribute("data-cmt-id", id); m.title = body;
+      range.surroundContents(m);
+      return true;
+    }catch(e){ return false; }   // selection crosses element boundaries → caller falls back
+  }
+  function sectionByTitle(title){
+    var t = (title||"").replace(/^\s*\d+\.\s*/,"").trim();
+    for(var i=0;i<sections.length;i++){
+      var h2 = sections[i].querySelector("h2");
+      if(h2 && h2.textContent.replace(/^\s*\d+\.\s*/,"").trim() === t) return sections[i];
+    }
+    return null;
+  }
+  function highlightSaved(c){
+    if(!c.quote || document.querySelector('mark.cmt[data-cmt-id="'+c.id+'"]')) return;
+    var sec = (c.sectionId && document.getElementById(c.sectionId)) || sectionByTitle(c.section);
+    if(!sec) return;
+    var w = document.createTreeWalker(sec, NodeFilter.SHOW_TEXT, null), n;
+    while((n = w.nextNode())){
+      if(n.parentElement && n.parentElement.closest("mark.cmt")) continue;
+      var idx = n.nodeValue.indexOf(c.quote);
+      if(idx !== -1){
+        var r = document.createRange();
+        r.setStart(n, idx); r.setEnd(n, idx + c.quote.length);
+        wrapRange(r, c.id, c.body);
+        return;
+      }
+    }
+  }
+  function unwrapMark(id){
+    var m = document.querySelector('mark.cmt[data-cmt-id="'+id+'"]');
+    if(!m) return;
+    var p = m.parentNode;
+    while(m.firstChild) p.insertBefore(m.firstChild, m);
+    p.removeChild(m); p.normalize();
+  }
+  function scrollToMark(id){
+    var m = document.querySelector('mark.cmt[data-cmt-id="'+id+'"]');
+    if(m){ m.scrollIntoView({block:"center",behavior:"smooth"}); m.classList.add("flash"); setTimeout(function(){m.classList.remove("flash");},1300); }
+  }
+  function openOnComment(id){
+    dock.classList.add("open");
+    var item = listEl.querySelector('[data-item="'+id+'"]');
+    if(item){ item.scrollIntoView({block:"center"}); item.classList.add("flash"); setTimeout(function(){item.classList.remove("flash");},1300); }
+  }
+  // Click a highlight in the doc → open the dock on that comment.
+  document.getElementById("doc").addEventListener("click", function(e){
+    var m = e.target.closest("mark.cmt");
+    if(m) openOnComment(m.getAttribute("data-cmt-id"));
+  });
+
+  comments.forEach(highlightSaved);   // restore highlights from a previous session
+  render();
+})();
+</script>
+</body>
+</html>

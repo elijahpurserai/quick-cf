@@ -1,0 +1,44 @@
+{
+  // Cloudflare Worker config for Quick — single-origin (SPA + Express API on one Worker).
+  // Frontend build (website/dist) is served by Static Assets; the Express app runs on the
+  // same Worker via the Node-compat httpServerHandler shim (see server/worker.ts).
+  "name": "quick-cf",
+  "main": "server/worker.ts",
+
+  // node:http server support (httpServerHandler) requires a recent compat date + nodejs_compat.
+  // Bump this to today's date when you first deploy; the value below is a safe floor.
+  "compatibility_date": "2025-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": "./website/dist",
+    "binding": "ASSETS",
+    // Serve /index.html for unmatched client-side routes (React Router).
+    "not_found_handling": "single-page-application",
+    // Hand these paths to the Worker (Express) BEFORE static assets:
+    //  - /api/*            → API routes
+    //  - SEO files         → sitemap.ts / robots.txt
+    //  - story/lesson HTML → OG meta-tag injection (buildPageHtml)
+    // Everything else (hashed JS/CSS, images, favicon) is served free from Static Assets.
+    "run_worker_first": [
+      "/api/*",
+      "/robots.txt",
+      "/sitemap.xml",
+      "/sitemap-*.xml",
+      "/*/story/*",
+      "/*/lesson/*"
+    ]
+  },
+
+  // Non-secret vars. Secrets (OPENAI_API_KEY, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET,
+  // GOOGLE_CLIENT_ID) are set with `wrangler secret put <NAME>` — never commit them.
+  "vars": {
+    "NODE_ENV": "production",
+    "CLIENT_URL": "https://quickstory.ai",
+    // Public (also baked into the frontend bundle). The Worker's server code reads
+    // process.env.VITE_SUPABASE_URL for the service-role Supabase client.
+    "VITE_SUPABASE_URL": "https://cjowsngbmaolaugvtyxm.supabase.co"
+  },
+
+  "observability": { "enabled": true }
+}
