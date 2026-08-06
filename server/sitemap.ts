@@ -1,12 +1,10 @@
 import { Router } from "express";
 import { supabase } from "./supabase";
+import { UI_LANGS, fetchTagSlugsByLang } from "./content_lang";
 
 const sitemapRoutes = Router();
 
 const BASE_URL = process.env.CLIENT_URL || "https://quickstory.ai";
-
-/** Languages that have full UI translations and should get their own sitemaps */
-const UI_LANGS = ["en", "he"];
 
 // --- robots.txt ---
 sitemapRoutes.get("/robots.txt", (_req, res) => {
@@ -24,11 +22,13 @@ Sitemap: ${BASE_URL}/sitemap.xml
 });
 
 // --- Helper: generate xhtml:link hreflang alternates for a path ---
-function hreflangLinks(pathWithoutLang: string): string {
-    return UI_LANGS.map(lang =>
+function hreflangLinks(pathWithoutLang: string, langs: string[] = UI_LANGS): string {
+    if (langs.length === 0) return "";
+    const xDefault = langs.includes("en") ? "en" : langs[0];
+    return langs.map(lang =>
         `    <xhtml:link rel="alternate" hreflang="${lang}" href="${BASE_URL}/${lang}${pathWithoutLang}"/>`
     ).concat(
-        `    <xhtml:link rel="alternate" hreflang="x-default" href="${BASE_URL}/en${pathWithoutLang}"/>`
+        `    <xhtml:link rel="alternate" hreflang="x-default" href="${BASE_URL}/${xDefault}${pathWithoutLang}"/>`
     ).join("\n");
 }
 
@@ -198,22 +198,28 @@ sitemapRoutes.get("/sitemap-tags-:lang.xml", async (req, res) => {
     }
 
     try {
-        const { data: tags, error } = await supabase
-            .from("tags")
-            .select("slug")
-            .limit(5000);
+        // Only list tags that actually have public content in THIS language.
+        // Listing every tag under every prefix submitted a pile of guaranteed-empty
+        // pages (e.g. /en/cat/<hebrew-tag>) — the tag API and the bot prerender both
+        // filter tagged content by language, so those URLs can never return anything.
+        const slugsByLang = await fetchTagSlugsByLang(UI_LANGS);
 
-        if (error) throw error;
+        const slugs = [...(slugsByLang.get(lang) || [])].sort();
 
         const now = new Date().toISOString().split("T")[0];
-        const urls = (tags || []).map(t => `  <url>
-    <loc>${BASE_URL}/${lang}/cat/${t.slug}</loc>
+        const urls = slugs.map(slug => {
+            // Alternates only for the languages this tag actually exists in.
+            const altLangs = UI_LANGS.filter(l => slugsByLang.get(l)?.has(slug));
+            return `  <url>
+    <loc>${BASE_URL}/${lang}/cat/${slug}</loc>
     <lastmod>${now}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
-${hreflangLinks(`/cat/${t.slug}`)}
-  </url>`).join("\n");
+${hreflangLinks(`/cat/${slug}`, altLangs)}
+  </url>`;
+        }).join("\n");
 
+        console.log(`[Sitemap] tags-${lang}: ${slugs.length} tags with content`);
         res.type("application/xml").send(xmlUrlset(urls));
     } catch (err) {
         console.error("[Sitemap] Error generating tags sitemap:", err);

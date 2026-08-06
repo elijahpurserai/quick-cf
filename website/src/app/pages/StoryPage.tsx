@@ -45,6 +45,7 @@ import { Visibility } from "../types";
 import ReactMarkdown from "react-markdown";
 import { useRef } from "react";
 import { exportToPDF } from "../utils/pdfExport";
+import { useContentLanguageRedirect } from "../utils/useContentLanguageRedirect";
 
 export function StoryPage() {
   const { identifier } = useParams();
@@ -71,6 +72,10 @@ export function StoryPage() {
 
   const localStory = stories.find((s) => s.id === identifier || s.slug === identifier);
   const story = fetchedStory || localStory;
+
+  // A story must be viewed under its own language prefix — otherwise every link
+  // built with localizedPath() (tag chips especially) inherits the wrong one.
+  useContentLanguageRedirect(story?.language);
 
   useEffect(() => {
     const fetchStory = async () => {

@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router";
 import { useApp } from "../contexts/AppContext";
 import { slugifyTag } from "../utils/tags";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useContentLanguageRedirect } from "../utils/useContentLanguageRedirect";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -48,6 +49,10 @@ export function LessonPage() {
 
     const localLesson = lessons.find((l) => l.id === identifier || l.slug === identifier);
     const lesson = fetchedLesson || localLesson;
+
+    // A lesson must be viewed under its own language prefix — otherwise every link
+    // built with localizedPath() (tag chips especially) inherits the wrong one.
+    useContentLanguageRedirect(lesson?.language);
 
     useEffect(() => {
         const fetchLesson = async () => {

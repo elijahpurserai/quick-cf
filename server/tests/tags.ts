@@ -103,6 +103,22 @@ const NON_ASCII_SLUG_INTEGRITY_TESTS = [
     "Non-ASCII tag names produce slugs that contain at least one non-ASCII or digit char",
 ] as const;
 
+const SITEMAP_TAG_LANG_TESTS = [
+    "Every tag in /sitemap-tags-en.xml has English content",
+    "Every tag in /sitemap-tags-he.xml has Hebrew content",
+    "Tags sitemaps don't cross-list single-language tags",
+] as const;
+
+const CONTENT_LANG_PREFIX_TESTS = [
+    "Hebrew story under /en/ resolves to the Hebrew page",
+    "Hebrew story page canonical points at the /he/ prefix",
+    "Hebrew story under its own /he/ prefix is served directly",
+] as const;
+
+const TAG_LINK_RESOLVES_TESTS = [
+    "Every tag on a Hebrew story resolves to a non-empty Hebrew tag page",
+] as const;
+
 // =============================================================================
 // Tag list API tests
 // =============================================================================
@@ -410,6 +426,177 @@ async function slugIntegrityTests(onStart?: (name: string) => void): Promise<Tes
 }
 
 // =============================================================================
+// Sitemap / tag-page language consistency
+//
+// Regression guard for the bug where /en/cat/<hebrew-slug> rendered empty: the
+// tags sitemap listed EVERY tag under EVERY language prefix, while both the tag
+// API and the bot prerender filter tagged content by language. Any tag listed
+// for a language it has no content in is a guaranteed-empty page submitted to
+// Google. The invariant: a tag appears in sitemap-tags-<lang>.xml only if the
+// tag API returns at least one creation for that same lang.
+// =============================================================================
+
+/** Pull the decoded tag slugs out of a sitemap-tags-<lang>.xml body. */
+function tagSlugsFromSitemap(xml: string): string[] {
+    const slugs: string[] = [];
+    const locRe = /<loc>[^<]*?\/cat\/([^<]+)<\/loc>/g;
+    let m: RegExpExecArray | null;
+    while ((m = locRe.exec(xml)) !== null) {
+        try { slugs.push(decodeURIComponent(m[1])); } catch { slugs.push(m[1]); }
+    }
+    return slugs;
+}
+
+async function sitemapTagLanguageTests(onStart?: (name: string) => void): Promise<TestResult[]> {
+    const results: TestResult[] = [];
+
+    const enSitemap = await httpGet("/sitemap-tags-en.xml");
+    const heSitemap = await httpGet("/sitemap-tags-he.xml");
+    const sitemapsOk = enSitemap.status === 200 && heSitemap.status === 200;
+
+    if (!sitemapsOk) {
+        return unrunResults(SITEMAP_TAG_LANG_TESTS, false,
+            "tags sitemaps unavailable",
+            `/sitemap-tags-en.xml returned ${enSitemap.status}, /sitemap-tags-he.xml returned ${heSitemap.status}`);
+    }
+
+    const enSlugs = tagSlugsFromSitemap(enSitemap.text);
+    const heSlugs = tagSlugsFromSitemap(heSitemap.text);
+
+    // Cap the per-slug API checks so a large tag table doesn't make the suite crawl.
+    const SAMPLE = 25;
+
+    async function emptyFor(slugs: string[], lang: string): Promise<string[]> {
+        const empty: string[] = [];
+        for (const slug of slugs.slice(0, SAMPLE)) {
+            const { json } = await apiGet(`/discovery/tags/s/${encodeURIComponent(slug)}?lang=${lang}`);
+            if (!Array.isArray(json) || json.length === 0) empty.push(slug);
+        }
+        return empty;
+    }
+
+    const enEmpty = await emptyFor(enSlugs, "en");
+    results.push(await runTest(SITEMAP_TAG_LANG_TESTS[0], async () => {
+        assert(enEmpty.length === 0,
+            `${enEmpty.length} of ${Math.min(enSlugs.length, SAMPLE)} sampled tags in /sitemap-tags-en.xml return no English content: ${enEmpty.slice(0, 5).join(", ")}`);
+    }, enEmpty, onStart));
+
+    const heEmpty = await emptyFor(heSlugs, "he");
+    results.push(await runTest(SITEMAP_TAG_LANG_TESTS[1], async () => {
+        assert(heEmpty.length === 0,
+            `${heEmpty.length} of ${Math.min(heSlugs.length, SAMPLE)} sampled tags in /sitemap-tags-he.xml return no Hebrew content: ${heEmpty.slice(0, 5).join(", ")}`);
+    }, heEmpty, onStart));
+
+    // A tag listed in both sitemaps must genuinely exist in both languages.
+    const inBoth = enSlugs.filter(slug => heSlugs.includes(slug)).slice(0, SAMPLE);
+    const crossListed: string[] = [];
+    for (const slug of inBoth) {
+        const { json: enJson } = await apiGet(`/discovery/tags/s/${encodeURIComponent(slug)}?lang=en`);
+        const { json: heJson } = await apiGet(`/discovery/tags/s/${encodeURIComponent(slug)}?lang=he`);
+        const enHas = Array.isArray(enJson) && enJson.length > 0;
+        const heHas = Array.isArray(heJson) && heJson.length > 0;
+        if (!enHas || !heHas) crossListed.push(`${slug} (en=${enHas}, he=${heHas})`);
+    }
+    results.push(await runTest(SITEMAP_TAG_LANG_TESTS[2], async () => {
+        assert(crossListed.length === 0,
+            `Tags listed in both sitemaps but missing content in one: ${crossListed.slice(0, 5).join("; ")}`);
+    }, crossListed, onStart));
+
+    return results;
+}
+
+// =============================================================================
+// Content language ↔ URL prefix
+//
+// A creation must only ever be served under the prefix matching its own
+// language. When a Hebrew story was reachable at /en/story/<slug>, every link
+// built with localizedPath() on that page inherited /en — including its tag
+// chips, which is how /en/cat/<hebrew-slug> came to exist at all.
+// NOTE: testFetch() follows redirects, so these assert the *destination*
+// (canonical + lang attribute) rather than the 301 itself.
+// =============================================================================
+
+async function contentLangPrefixTests(onStart?: (name: string) => void): Promise<TestResult[]> {
+    const results: TestResult[] = [];
+    const botUA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
+
+    // Find a Hebrew story slug from the Hebrew stories sitemap.
+    const heStories = await httpGet("/sitemap-stories-he.xml");
+    const slugMatch = heStories.text.match(/<loc>[^<]*?\/story\/([^<]+)<\/loc>/);
+    const heSlug = slugMatch ? slugMatch[1] : null;
+
+    if (!heSlug) {
+        return unrunResults(CONTENT_LANG_PREFIX_TESTS, heStories.status === 200,
+            "no Hebrew stories in /sitemap-stories-he.xml",
+            `/sitemap-stories-he.xml returned ${heStories.status}`);
+    }
+
+    const wrongPrefix = await httpGet(`/en/story/${heSlug}`, { "User-Agent": botUA });
+
+    results.push(await runTest(CONTENT_LANG_PREFIX_TESTS[0], async () => {
+        assert(wrongPrefix.status === 200, `Expected 200 after redirect, got ${wrongPrefix.status}`);
+        assert(wrongPrefix.text.includes('lang="he"'),
+            `/en/story/${heSlug} should end up on the Hebrew page, but the HTML has no lang="he"`);
+    }, onStart));
+
+    results.push(await runTest(CONTENT_LANG_PREFIX_TESTS[1], async () => {
+        const canonical = wrongPrefix.text.match(/<link rel="canonical" href="([^"]+)"/)?.[1] || "";
+        assertNonEmpty(canonical, "canonical link");
+        assert(canonical.includes(`/he/story/${heSlug}`),
+            `Canonical should point at the /he/ prefix but was "${canonical}"`);
+        assert(!canonical.includes("/en/story/"),
+            `Hebrew story must not self-canonicalize under /en/: "${canonical}"`);
+    }, onStart));
+
+    const rightPrefix = await httpGet(`/he/story/${heSlug}`, { "User-Agent": botUA });
+    results.push(await runTest(CONTENT_LANG_PREFIX_TESTS[2], async () => {
+        assert(rightPrefix.status === 200, `Expected 200, got ${rightPrefix.status}`);
+        assert(rightPrefix.text.includes('lang="he"'), `Expected lang="he"`);
+    }, onStart));
+
+    return results;
+}
+
+// =============================================================================
+// The original report: a Hebrew story's tag chips led to empty pages.
+// Every tag on a Hebrew story must resolve to a tag page with content.
+// =============================================================================
+
+async function tagLinksResolveTests(onStart?: (name: string) => void): Promise<TestResult[]> {
+    const heStories = await httpGet("/sitemap-stories-he.xml");
+    const slugMatch = heStories.text.match(/<loc>[^<]*?\/story\/([^<]+)<\/loc>/);
+    const heSlug = slugMatch ? slugMatch[1] : null;
+
+    if (!heSlug) {
+        return unrunResults(TAG_LINK_RESOLVES_TESTS, heStories.status === 200,
+            "no Hebrew stories in /sitemap-stories-he.xml",
+            `/sitemap-stories-he.xml returned ${heStories.status}`);
+    }
+
+    const { status: storyStatus, json: story } = await apiGet(`/stories/${heSlug}`);
+    const tags: any[] = Array.isArray(story?.tags) ? story.tags : [];
+
+    if (storyStatus !== 200 || tags.length === 0) {
+        return unrunResults(TAG_LINK_RESOLVES_TESTS, storyStatus === 200,
+            `Hebrew story ${heSlug} has no tags`,
+            `GET /api/stories/${heSlug} returned ${storyStatus}`);
+    }
+
+    const broken: string[] = [];
+    for (const tag of tags) {
+        const slug = typeof tag === "string" ? tag : tag.slug;
+        if (!slug) { broken.push(`<empty slug for "${typeof tag === "string" ? tag : tag.name}">`); continue; }
+        const { json } = await apiGet(`/discovery/tags/s/${encodeURIComponent(slug)}?lang=he`);
+        if (!Array.isArray(json) || json.length === 0) broken.push(slug);
+    }
+
+    return [await runTest(TAG_LINK_RESOLVES_TESTS[0], async () => {
+        assert(broken.length === 0,
+            `${broken.length}/${tags.length} tags on Hebrew story "${heSlug}" lead to an empty tag page: ${broken.join(", ")}`);
+    }, { storySlug: heSlug, tags, broken }, onStart)];
+}
+
+// =============================================================================
 // Export the category
 // =============================================================================
 
@@ -425,6 +612,9 @@ export const tagsTestCategory: TestCategory = {
         for (const r of await tagSlugLookupTests(onStart)) emit(r);
         for (const r of await slugIntegrityTests(onStart)) emit(r);
         for (const r of await tagPageLanguageTests(onStart)) emit(r);
+        for (const r of await sitemapTagLanguageTests(onStart)) emit(r);
+        for (const r of await contentLangPrefixTests(onStart)) emit(r);
+        for (const r of await tagLinksResolveTests(onStart)) emit(r);
         return results;
     }
 };

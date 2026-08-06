@@ -17,6 +17,7 @@ import { seoPrerender } from "./seo_prerender";
 import { supabase } from "./supabase";
 import { sitemapRoutes } from "./sitemap";
 import { testRunnerRoutes } from "./tests/runner";
+import { UI_LANGS, fetchContentLang, urlLangForContent } from "./content_lang";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -86,6 +87,43 @@ app.use((_req, res, next) => {
 
 // Sitemap & robots.txt (must be before SPA catch-all)
 app.use(sitemapRoutes);
+
+// --- Language reconciliation for content URLs ---
+// A creation must only ever be served under the URL prefix matching its own
+// language. Serving a Hebrew story at /en/story/<slug> made every internal link
+// on that page inherit the /en prefix — including its tag chips, which then hit
+// /en/cat/<hebrew-slug> and rendered empty (the tag API filters by language).
+// It also let Google index Hebrew content as English. 301 to the right prefix.
+const CONTENT_PATH_RE = /^\/(?:([a-z]{2})\/)?(story|lesson)\/([^/]+)\/?$/;
+
+app.use(async (req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+
+    const match = req.path.match(CONTENT_PATH_RE);
+    if (!match) return next();
+
+    const [, langFromUrl, type, slug] = match;
+
+    // An unrecognized prefix isn't a language — leave it alone.
+    if (langFromUrl && !UI_LANGS.includes(langFromUrl)) return next();
+
+    try {
+        const contentLang = await fetchContentLang(type as "story" | "lesson", slug);
+        // Unknown slug: fall through so the normal 404/SPA path handles it.
+        if (!contentLang) return next();
+
+        const correctLang = urlLangForContent(contentLang);
+        if (langFromUrl === correctLang) return next();
+
+        const target = `/${correctLang}/${type}/${slug}`;
+        const query = req.originalUrl.slice(req.path.length); // preserve ?a=b#c
+        console.log(`[Lang] Redirecting ${req.path} -> ${target} (content language: ${contentLang})`);
+        return res.redirect(301, `${target}${query}`);
+    } catch (err: any) {
+        console.error(`[Lang] Reconciliation failed for ${req.path}:`, err.message);
+        return next();
+    }
+});
 
 // SEO Pre-rendering for search bots
 app.use(seoPrerender);

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { supabase } from "./supabase";
 import { toOgImageUrl } from "./image_utils";
+import { UI_LANGS, RTL_LANGS, urlLangForContent } from "./content_lang";
 
 const BOTS = [
     "googlebot",
@@ -129,9 +130,16 @@ export async function seoPrerender(req: Request, res: Response, next: NextFuncti
         const rawImageUrl = creation.image_url || `${clientUrl}/images/og-default.png`;
         const imageUrl = toOgImageUrl(rawImageUrl);
 
-        // Determine language: URL prefix > content language > fallback 'en'
-        const lang = langFromUrl || details.language || 'en';
-        const isRTL = ['he', 'ar'].includes(lang);
+        // Determine language: the CONTENT's language wins over the URL prefix.
+        // A bot hitting /en/story/<hebrew-slug> must not be told that URL is
+        // canonical — that's what got Hebrew stories indexed as English and
+        // spread the wrong prefix into every tag link on the page.
+        const lang = urlLangForContent(details.language);
+        if (langFromUrl !== lang) {
+            console.log(`[SEO] Redirecting bot ${path} -> /${lang}/${type}/${slug}`);
+            return res.redirect(301, `/${lang}/${type}/${slug}`);
+        }
+        const isRTL = RTL_LANGS.includes(lang);
         const dirAttr = isRTL ? ' dir="rtl"' : '';
         const langPrefix = `/${lang}`;
         const canonicalUrl = `${clientUrl}${langPrefix}/${type}/${slug}`;
@@ -207,7 +215,7 @@ async function prerenderDirectoryPage(
     next: NextFunction
 ) {
     const clientUrl = process.env.CLIENT_URL || "https://quickstory.ai";
-    const isRTL = ['he', 'ar'].includes(lang);
+    const isRTL = RTL_LANGS.includes(lang);
     const dirAttr = isRTL ? ' dir="rtl"' : '';
     const langPrefix = `/${lang}`;
 
@@ -301,7 +309,6 @@ ${links}
         });
 
         // Hreflang links
-        const UI_LANGS = ["en", "he"];
         const hreflangLinks = UI_LANGS
             .map(l => `    <link rel="alternate" hreflang="${l}" href="${clientUrl}/${l}/${pageSlug}">`)
             .concat(`    <link rel="alternate" hreflang="x-default" href="${clientUrl}/en/${pageSlug}">`)
@@ -386,7 +393,7 @@ async function prerenderTagPage(
     next: NextFunction
 ) {
     const clientUrl = process.env.CLIENT_URL || "https://quickstory.ai";
-    const isRTL = ['he', 'ar'].includes(lang);
+    const isRTL = RTL_LANGS.includes(lang);
     const dirAttr = isRTL ? ' dir="rtl"' : '';
     const langPrefix = `/${lang}`;
     const canonicalUrl = `${clientUrl}${langPrefix}/cat/${tagSlug}`;
@@ -417,6 +424,10 @@ async function prerenderTagPage(
         // 3. Fetch full creations with details
         let stories: any[] = [];
         let lessons: any[] = [];
+        // Which UI languages this tag actually has public content in. Used to emit
+        // hreflang alternates only for real pages, and to noindex the empty ones —
+        // a tag that only exists on Hebrew stories has no English page worth indexing.
+        const langsWithContent = new Set<string>();
 
         if (creationIds.length > 0) {
             const { data: creations, error: creationsError } = await supabase
@@ -432,6 +443,12 @@ async function prerenderTagPage(
                 .limit(200);
 
             if (creationsError) throw creationsError;
+
+            for (const c of (creations || []) as any[]) {
+                const detail = c.stories || c.lessons;
+                const l = Array.isArray(detail) ? detail[0]?.language : detail?.language;
+                if (l && UI_LANGS.includes(l)) langsWithContent.add(l);
+            }
 
             // Filter by language
             const filtered = (creations || []).filter((c: any) => {
@@ -479,20 +496,25 @@ async function prerenderTagPage(
             }))
         });
 
-        // Hreflang links
-        const UI_LANGS = ["en", "he"];
-        const hreflangLinks = UI_LANGS
+        // Hreflang links — only for languages that actually have content for this tag.
+        const altLangs = UI_LANGS.filter(l => langsWithContent.has(l));
+        const xDefault = altLangs.includes("en") ? "en" : altLangs[0];
+        const hreflangLinks = altLangs
             .map(l => `    <link rel="alternate" hreflang="${l}" href="${clientUrl}/${l}/cat/${tagSlug}">`)
-            .concat(`    <link rel="alternate" hreflang="x-default" href="${clientUrl}/en/cat/${tagSlug}">`)
+            .concat(xDefault ? [`    <link rel="alternate" hreflang="x-default" href="${clientUrl}/${xDefault}/cat/${tagSlug}">`] : [])
             .join("\n");
+
+        // Don't let an empty language variant into the index.
+        const robotsMeta = totalCount > 0
+            ? ""
+            : `\n    <meta name="robots" content="noindex,follow">`;
 
         const html = `<!DOCTYPE html>
 <html lang="${lang}"${dirAttr}>
 <head>
     <meta charset="UTF-8">
     <title>${escapeHtml(pageTitle)} | Quick</title>
-    <meta name="description" content="${escapeHtml(pageDescription)}">
-    <meta name="robots" content="index, follow">
+    <meta name="description" content="${escapeHtml(pageDescription)}">${robotsMeta}
     <link rel="canonical" href="${canonicalUrl}">
 ${hreflangLinks}
 
@@ -554,6 +576,9 @@ ${totalCount === 0 ? `        <p>No stories or lessons found for this tag yet.</
 </html>`;
 
         console.log(`[SEO] Served prerendered tag page: ${tagSlug} (${lang}) — ${totalCount} items`);
+        // Override the app-wide "index, follow" header for empty language variants,
+        // otherwise the header and the meta tag disagree.
+        if (totalCount === 0) res.setHeader("X-Robots-Tag", "noindex, follow");
         return res.send(html);
     } catch (err) {
         console.error(`[SEO] Error pre-rendering tag page:`, err);
