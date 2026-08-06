@@ -42,6 +42,13 @@
       "/robots.txt",
       "/sitemap.xml",
       "/sitemap-*.xml",
+      // /health carries the X-Robots-Tag middleware; without it Static Assets answers
+      // and the header is never set.
+      "/health",
+      // Both shapes are required: "/*/story/*" needs a leading path segment and does
+      // NOT match an un-prefixed "/story/:slug".
+      "/story/*",
+      "/lesson/*",
       "/*/story/*",
       "/*/lesson/*",
       "/all-stories",

@@ -5,10 +5,10 @@
  */
 
 import { TestCategory, TestResult } from "./types";
+import { testFetch } from "./self_request";
 
-const SERVER_PORT = process.env.PORT || 3001;
-const BASE_URL = process.env.TEST_BASE_URL || `http://localhost:${SERVER_PORT}`;
-const API_BASE = `${BASE_URL}/api`;
+// NOTE: requests go through testFetch() — on Workers a self-fetch over the network
+// returns an instant 522, so it dispatches in-isolate instead. See ./self_request.
 
 async function httpGet(path: string, headers: Record<string, string> = {}): Promise<{
     status: number;
@@ -16,7 +16,7 @@ async function httpGet(path: string, headers: Record<string, string> = {}): Prom
     json: any;
     headers: Record<string, string>;
 }> {
-    const res = await fetch(`${BASE_URL}${path}`, { headers });
+    const res = await testFetch(path, { headers });
     const text = await res.text();
     let json: any = null;
     try { json = JSON.parse(text); } catch { /* not JSON */ }
@@ -26,7 +26,7 @@ async function httpGet(path: string, headers: Record<string, string> = {}): Prom
 }
 
 async function apiGet(path: string): Promise<{ status: number; json: any }> {
-    const res = await fetch(`${API_BASE}${path}`);
+    const res = await testFetch(`/api${path}`);
     let json: any = null;
     try { json = await res.json(); } catch { /* empty */ }
     return { status: res.status, json };
@@ -108,7 +108,10 @@ async function tagListApiTests(onStart?: (name: string) => void): Promise<TestRe
         }
     } else {
         results.push(await runTest("Tag list structure tests (SKIPPED — no tags in DB)", async () => {
-            // pass
+            // A 200 with an empty array is a real skip; anything else means the
+            // structure tests below never ran and must not report green.
+            assert(status === 200,
+                `Cannot skip safely: GET /api/discovery/tags returned ${status}, so the tag structure tests did not run`);
         }, onStart));
     }
 

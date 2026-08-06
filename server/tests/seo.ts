@@ -5,9 +5,10 @@
  */
 
 import { TestCategory, TestResult } from "./types";
+import { testFetch } from "./self_request";
 
-const SERVER_PORT = process.env.PORT || 3001;
-const BASE_URL = process.env.TEST_BASE_URL || `http://localhost:${SERVER_PORT}`;
+// NOTE: requests go through testFetch() — on Workers a self-fetch over the network
+// returns an instant 522, so it dispatches in-isolate instead. See ./self_request.
 
 /** Helper: make a GET request and return { status, text, headers } */
 async function httpGet(path: string, headers: Record<string, string> = {}): Promise<{
@@ -15,7 +16,7 @@ async function httpGet(path: string, headers: Record<string, string> = {}): Prom
     text: string;
     headers: Record<string, string>;
 }> {
-    const res = await fetch(`${BASE_URL}${path}`, { headers });
+    const res = await testFetch(path, { headers });
     const text = await res.text();
     const responseHeaders: Record<string, string> = {};
     res.headers.forEach((value, key) => {
@@ -269,7 +270,11 @@ async function botPrerenderTests(onStart?: (name: string) => void): Promise<Test
         }, onStart));
     } else {
         results.push(await runTest("Bot prerender: story tests (SKIPPED — no stories in DB)", async () => {
-            // pass — nothing to test
+            // Only a genuinely empty sitemap is a valid skip. If the sitemap request
+            // itself failed, slug discovery never ran and the story prerender tests
+            // below were silently not exercised — fail instead of reporting green.
+            assert(storiesRes.status === 200,
+                `Cannot skip safely: /sitemap-stories.xml returned ${storiesRes.status}, so no story slug could be discovered and the story prerender tests did not run`);
         }, onStart));
     }
 
@@ -292,7 +297,8 @@ async function botPrerenderTests(onStart?: (name: string) => void): Promise<Test
         }, onStart));
     } else {
         results.push(await runTest("Bot prerender: language-prefixed URL tests (SKIPPED — no lang-prefixed stories in sitemap)", async () => {
-            // pass — nothing to test
+            assert(storiesRes.status === 200,
+                `Cannot skip safely: /sitemap-stories.xml returned ${storiesRes.status}, so no language-prefixed story URL could be discovered`);
         }, onStart));
     }
 
@@ -313,7 +319,8 @@ async function botPrerenderTests(onStart?: (name: string) => void): Promise<Test
         }, onStart));
     } else {
         results.push(await runTest("Bot prerender: lesson tests (SKIPPED — no lessons in DB)", async () => {
-            // pass — nothing to test
+            assert(lessonsRes.status === 200,
+                `Cannot skip safely: /sitemap-lessons.xml returned ${lessonsRes.status}, so no lesson slug could be discovered and the lesson prerender tests did not run`);
         }, onStart));
     }
 
@@ -526,7 +533,8 @@ async function tagPageTests(onStart?: (name: string) => void): Promise<TestResul
         }, onStart));
     } else {
         results.push(await runTest("Tag page bot prerender tests (SKIPPED — no tags in DB)", async () => {
-            // pass — nothing to test
+            assert(tagsRes.status === 200,
+                `Cannot skip safely: /sitemap-tags-en.xml returned ${tagsRes.status}, so no tag slug could be discovered and the tag page prerender tests did not run`);
         }, onStart));
     }
 

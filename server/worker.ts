@@ -27,4 +27,23 @@ import app from "./index";
 const PORT = 8787;
 app.listen(PORT);
 
-export default httpServerHandler({ port: PORT });
+const handler = httpServerHandler({ port: PORT });
+
+// Let the in-app test suite (server/tests/*) send requests back into this Worker
+// WITHOUT a network round-trip.
+//
+// A Worker cannot fetch its own public hostname: a subrequest to a Cloudflare-fronted
+// host that routes back to a Worker returns an instant 522 (cloudflare/workerd#787).
+// That is why every HTTP-based test reported "Expected 200, got 522" in production
+// while passing locally, and why no TEST_BASE_URL value can fix it.
+//
+// Calling this handler's own fetch() reuses the same inbound bridge that serves real
+// traffic, so Express sees a normal request and all middleware runs. See
+// server/tests/self_request.ts. Only the test suite reads this.
+(globalThis as any).__SELF_DISPATCH__ = (request: Request): Promise<Response> =>
+    (handler as any).fetch(request, env, {
+        waitUntil: (promise: Promise<unknown>) => { void promise; },
+        passThroughOnException: () => { /* no-op */ },
+    });
+
+export default handler;

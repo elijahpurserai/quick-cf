@@ -7,3 +7,6 @@ setup_repo.sh
 
 # Cloudflare Wrangler local cache
 .wrangler/
+
+# Scratch folder used to park files for deletion (never commit it)
+_to_delete/

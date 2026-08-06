@@ -8,13 +8,14 @@
 import jwt from "jsonwebtoken";
 import { TestCategory, TestResult } from "./types";
 import { supabase } from "../supabase";
+import { testFetch } from "./self_request";
 
-const SERVER_PORT = process.env.PORT || 3001;
-const BASE_URL = process.env.TEST_BASE_URL || `http://localhost:${SERVER_PORT}`;
+// NOTE: requests go through testFetch() — on Workers a self-fetch over the network
+// returns an instant 522, so it dispatches in-isolate instead. See ./self_request.
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
 
 async function httpGet(path: string, cookie?: string): Promise<{ status: number; body: any }> {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const res = await testFetch(path, {
         headers: cookie ? { Cookie: cookie } : {},
     });
     const body = await res.json().catch(() => null);
@@ -22,7 +23,7 @@ async function httpGet(path: string, cookie?: string): Promise<{ status: number;
 }
 
 async function httpPost(path: string, payload: any, cookie?: string): Promise<{ status: number; body: any }> {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const res = await testFetch(path, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
