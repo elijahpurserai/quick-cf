@@ -38,10 +38,11 @@ const isApproved = (req: AuthRequest, res: Response, next: NextFunction) => {
 
 // GET /api/tests/categories — list available test categories
 testRunnerRoutes.get("/categories", authenticateJWT, isApproved, (_req: AuthRequest, res: Response) => {
+    // No testCount: the real number is only known once a run happens (some blocks
+    // are fixture-dependent), and a hand-maintained constant just drifts.
     const categories = TEST_CATEGORIES.map(c => ({
         name: c.name,
         description: c.description,
-        testCount: c.testCount,
     }));
     res.json({ categories });
 });
@@ -62,6 +63,7 @@ testRunnerRoutes.post("/run", authenticateJWT, isApproved, async (req: AuthReque
         categories: [],
         totalPassed: 0,
         totalFailed: 0,
+        totalSkipped: 0,
         totalDurationMs: 0,
     };
 
@@ -71,17 +73,20 @@ testRunnerRoutes.post("/run", authenticateJWT, isApproved, async (req: AuthReque
         try {
             const results = await category.run();
             const passed = results.filter(r => r.passed).length;
-            const failed = results.filter(r => !r.passed).length;
+            const skipped = results.filter(r => r.skipped).length;
+            const failed = results.filter(r => !r.passed && !r.skipped).length;
 
             response.categories.push({
                 name: category.name,
                 results,
                 passed,
                 failed,
+                skipped,
             });
 
             response.totalPassed += passed;
             response.totalFailed += failed;
+            response.totalSkipped += skipped;
         } catch (err: any) {
             response.categories.push({
                 name: category.name,
@@ -93,6 +98,7 @@ testRunnerRoutes.post("/run", authenticateJWT, isApproved, async (req: AuthReque
                 }],
                 passed: 0,
                 failed: 1,
+                skipped: 0,
             });
             response.totalFailed += 1;
         }
@@ -111,7 +117,7 @@ testRunnerRoutes.post("/run", authenticateJWT, isApproved, async (req: AuthReque
  *   - "category_start"  { category: string }
  *   - "test_start"      { category: string, name: string }
  *   - "test_result"     { category: string, result: TestResult }
- *   - "category_done"   { category: string, passed: number, failed: number }
+ *   - "category_done"   { category: string, passed: number, failed: number, skipped: number }
  *   - "done"            { totalPassed: number, totalFailed: number, totalDurationMs: number }
  */
 testRunnerRoutes.get("/run/stream", authenticateJWT, isApproved, async (req: AuthRequest, res: Response) => {
@@ -140,6 +146,7 @@ testRunnerRoutes.get("/run/stream", authenticateJWT, isApproved, async (req: Aut
 
     let totalPassed = 0;
     let totalFailed = 0;
+    let totalSkipped = 0;
     const overallStart = Date.now();
 
     for (const category of categoriesToRun) {
@@ -152,11 +159,13 @@ testRunnerRoutes.get("/run/stream", authenticateJWT, isApproved, async (req: Aut
             );
 
             const passed = results.filter(r => r.passed).length;
-            const failed = results.filter(r => !r.passed).length;
+            const skipped = results.filter(r => r.skipped).length;
+            const failed = results.filter(r => !r.passed && !r.skipped).length;
             totalPassed += passed;
             totalFailed += failed;
+            totalSkipped += skipped;
 
-            send("category_done", { category: category.name, passed, failed });
+            send("category_done", { category: category.name, passed, failed, skipped });
         } catch (err: any) {
             const errorResult = {
                 name: "Category execution error",
@@ -165,7 +174,7 @@ testRunnerRoutes.get("/run/stream", authenticateJWT, isApproved, async (req: Aut
                 durationMs: 0,
             };
             send("test_result", { category: category.name, result: errorResult });
-            send("category_done", { category: category.name, passed: 0, failed: 1 });
+            send("category_done", { category: category.name, passed: 0, failed: 1, skipped: 0 });
             totalFailed += 1;
         }
     }
@@ -173,6 +182,7 @@ testRunnerRoutes.get("/run/stream", authenticateJWT, isApproved, async (req: Aut
     send("done", {
         totalPassed,
         totalFailed,
+        totalSkipped,
         totalDurationMs: Date.now() - overallStart,
     });
 
