@@ -6,6 +6,7 @@
 
 import { TestCategory, TestResult } from "./types";
 import { testFetch } from "./self_request";
+import { unrunResults } from "./result";
 
 // NOTE: requests go through testFetch() — on Workers a self-fetch over the network
 // returns an instant 522, so it dispatches in-isolate instead. See ./self_request.
@@ -53,6 +54,55 @@ function assertNonEmpty(value: any, label: string) {
     }
 }
 
+// Test names are declared statically so a block whose fixture is missing still
+// emits one result per test. Details that vary per run (slugs, counts) live in the
+// assertion messages, not the names, so the rows stay stable.
+const TAG_STRUCTURE_TESTS = [
+    "Every tag has name and slug fields",
+    "No tag has an empty slug",
+] as const;
+
+const NON_ASCII_TAG_TESTS = [
+    "Non-ASCII tags all have non-empty slugs",
+    "Non-ASCII tag slugs don't contain only dashes or whitespace",
+] as const;
+
+const HEBREW_FILTER_TESTS = [
+    "Hebrew-filtered tags all have non-empty slugs",
+] as const;
+
+const ENGLISH_LOOKUP_TESTS = [
+    "GET /discovery/tags/s/:slug returns 200",
+    "Tag lookup returns creations with tags field",
+] as const;
+
+const NON_ASCII_LOOKUP_TESTS = [
+    "Non-ASCII tag lookup by slug returns 200",
+    "Non-ASCII tag lookup by name fallback returns 200",
+] as const;
+
+const LANG_FILTERED_LOOKUP_TESTS = [
+    "Tag lookup with lang=en filter returns 200",
+] as const;
+
+const HEBREW_TAG_PAGE_TESTS = [
+    "Hebrew tag page: bot gets HTML",
+    "Hebrew tag page: has Hebrew lang attribute",
+    "Hebrew tag page: has RTL direction",
+    "Hebrew tag page: has OG meta tags",
+    "Hebrew tag via /cat/ (no lang prefix): returns HTML",
+] as const;
+
+const CROSS_LANGUAGE_TAG_PAGE_TESTS = [
+    "/he/cat/ with English tag slug: returns 200",
+    "/he/cat/ with English tag slug: has Hebrew lang attribute",
+    "/en/cat/ tag page: has English lang attribute",
+] as const;
+
+const NON_ASCII_SLUG_INTEGRITY_TESTS = [
+    "Non-ASCII tag names produce slugs that contain at least one non-ASCII or digit char",
+] as const;
+
 // =============================================================================
 // Tag list API tests
 // =============================================================================
@@ -71,7 +121,7 @@ async function tagListApiTests(onStart?: (name: string) => void): Promise<TestRe
     }, onStart));
 
     if (Array.isArray(json) && json.length > 0) {
-        results.push(await runTest("Every tag has name and slug fields", async () => {
+        results.push(await runTest(TAG_STRUCTURE_TESTS[0], async () => {
             for (const tag of json) {
                 assert(typeof tag.name === "string", `Tag missing name: ${JSON.stringify(tag)}`);
                 assert(typeof tag.slug === "string", `Tag missing slug: ${JSON.stringify(tag)}`);
@@ -79,7 +129,7 @@ async function tagListApiTests(onStart?: (name: string) => void): Promise<TestRe
             }
         }, onStart));
 
-        results.push(await runTest("No tag has an empty slug", async () => {
+        results.push(await runTest(TAG_STRUCTURE_TESTS[1], async () => {
             const broken = json.filter((t: any) => !t.slug || t.slug.trim() === "");
             assert(broken.length === 0,
                 `Found ${broken.length} tag(s) with empty slugs: ${broken.map((t: any) => t.name).join(", ")}`);
@@ -88,13 +138,13 @@ async function tagListApiTests(onStart?: (name: string) => void): Promise<TestRe
         // Check Hebrew tags specifically (non-ASCII names)
         const hebrewTags = json.filter((t: any) => /[^\x00-\x7F]/.test(t.name));
         if (hebrewTags.length > 0) {
-            results.push(await runTest(`Non-ASCII tags (${hebrewTags.length}) all have non-empty slugs`, async () => {
+            results.push(await runTest(NON_ASCII_TAG_TESTS[0], async () => {
                 for (const tag of hebrewTags) {
                     assertNonEmpty(tag.slug, `Slug for tag "${tag.name}"`);
                 }
             }, hebrewTags, onStart));
 
-            results.push(await runTest("Non-ASCII tag slugs don't contain only dashes or whitespace", async () => {
+            results.push(await runTest(NON_ASCII_TAG_TESTS[1], async () => {
                 for (const tag of hebrewTags) {
                     const normalized = tag.slug.replace(/-/g, "").trim();
                     assert(normalized.length > 0,
@@ -102,17 +152,16 @@ async function tagListApiTests(onStart?: (name: string) => void): Promise<TestRe
                 }
             }, onStart));
         } else {
-            results.push(await runTest("Non-ASCII (Hebrew) tag slug tests (SKIPPED — no non-ASCII tags in DB)", async () => {
-                // pass
-            }, onStart));
+            results.push(...unrunResults(NON_ASCII_TAG_TESTS, true,
+                "no non-ASCII tags in the DB", ""));
         }
     } else {
-        results.push(await runTest("Tag list structure tests (SKIPPED — no tags in DB)", async () => {
-            // A 200 with an empty array is a real skip; anything else means the
-            // structure tests below never ran and must not report green.
-            assert(status === 200,
-                `Cannot skip safely: GET /api/discovery/tags returned ${status}, so the tag structure tests did not run`);
-        }, onStart));
+        results.push(...unrunResults(TAG_STRUCTURE_TESTS, status === 200,
+            "no tags in the DB",
+            `GET /api/discovery/tags returned ${status}`));
+        results.push(...unrunResults(NON_ASCII_TAG_TESTS, status === 200,
+            "no tags in the DB",
+            `GET /api/discovery/tags returned ${status}`));
     }
 
     return results;
@@ -142,11 +191,16 @@ async function tagLanguageFilterTests(onStart?: (name: string) => void): Promise
     }, heTags, onStart));
 
     if (Array.isArray(heTags) && heTags.length > 0) {
-        results.push(await runTest("Hebrew-filtered tags all have non-empty slugs", async () => {
+        results.push(await runTest(HEBREW_FILTER_TESTS[0], async () => {
             const broken = heTags.filter((t: any) => !t.slug || t.slug.trim() === "");
             assert(broken.length === 0,
                 `Found ${broken.length} Hebrew tag(s) with empty slugs: ${broken.map((t: any) => t.name).join(", ")}`);
         }, heTags, onStart));
+    } else {
+        // Previously emitted nothing at all — the test simply vanished from the run.
+        results.push(...unrunResults(HEBREW_FILTER_TESTS, heStatus === 200,
+            "no Hebrew-filtered tags in the DB",
+            `GET /api/discovery/tags?lang=he returned ${heStatus}`));
     }
 
     return results;
@@ -160,34 +214,35 @@ async function tagSlugLookupTests(onStart?: (name: string) => void): Promise<Tes
     const results: TestResult[] = [];
 
     // Fetch all tags to get a real slug to test against
-    const { json: allTags } = await apiGet("/discovery/tags");
+    const { status: allTagsStatus, json: allTags } = await apiGet("/discovery/tags");
+    const tagsOk = allTagsStatus === 200;
     const tags: any[] = Array.isArray(allTags) ? allTags : [];
     const englishTag = tags.find((t: any) => /^[\x00-\x7F]+$/.test(t.name) && t.slug && t.count > 0);
     const nonAsciiTag = tags.find((t: any) => /[^\x00-\x7F]/.test(t.name) && t.slug && t.count > 0);
 
     if (englishTag) {
         const { status, json } = await apiGet(`/discovery/tags/s/${encodeURIComponent(englishTag.slug)}`);
-        results.push(await runTest(`GET /discovery/tags/s/${englishTag.slug.substring(0, 20)}... returns 200`, async () => {
+        results.push(await runTest(ENGLISH_LOOKUP_TESTS[0], async () => {
             assert(status === 200, `Expected 200, got ${status}`);
             assert(Array.isArray(json), `Expected array of creations, got ${typeof json}`);
         }, json, onStart));
 
-        results.push(await runTest("Tag lookup returns creations with tags field", async () => {
+        results.push(await runTest(ENGLISH_LOOKUP_TESTS[1], async () => {
             if (Array.isArray(json) && json.length > 0) {
                 const creation = json[0];
                 assert(Array.isArray(creation.tags), `Expected tags array on creation, got ${typeof creation.tags}`);
             }
         }, onStart));
     } else {
-        results.push(await runTest("English tag slug lookup (SKIPPED — no English tags with content)", async () => {
-            // pass
-        }, onStart));
+        results.push(...unrunResults(ENGLISH_LOOKUP_TESTS, tagsOk,
+            "no English tags with content in the DB",
+            `GET /api/discovery/tags returned ${allTagsStatus}`));
     }
 
     if (nonAsciiTag) {
         const encoded = encodeURIComponent(nonAsciiTag.slug);
         const { status, json } = await apiGet(`/discovery/tags/s/${encoded}`);
-        results.push(await runTest(`Non-ASCII tag lookup (slug: "${nonAsciiTag.slug.substring(0, 15)}") returns 200`, async () => {
+        results.push(await runTest(NON_ASCII_LOOKUP_TESTS[0], async () => {
             assert(status === 200, `Expected 200, got ${status}. Tag: ${JSON.stringify(nonAsciiTag)}`);
             assert(Array.isArray(json), `Expected array, got ${typeof json}`);
         }, json, onStart));
@@ -195,14 +250,14 @@ async function tagSlugLookupTests(onStart?: (name: string) => void): Promise<Tes
         // Also test name-based fallback: looking up by tag name should also work
         const nameEncoded = encodeURIComponent(nonAsciiTag.name);
         const { status: nameStatus, json: nameJson } = await apiGet(`/discovery/tags/s/${nameEncoded}`);
-        results.push(await runTest(`Non-ASCII tag lookup by name fallback: "${nonAsciiTag.name.substring(0, 15)}"`, async () => {
+        results.push(await runTest(NON_ASCII_LOOKUP_TESTS[1], async () => {
             assert(nameStatus === 200, `Expected 200 for name lookup, got ${nameStatus}`);
             assert(Array.isArray(nameJson), `Expected array, got ${typeof nameJson}`);
         }, nameJson, onStart));
     } else {
-        results.push(await runTest("Non-ASCII tag lookup tests (SKIPPED — no non-ASCII tags with content)", async () => {
-            // pass
-        }, onStart));
+        results.push(...unrunResults(NON_ASCII_LOOKUP_TESTS, tagsOk,
+            "no non-ASCII tags with content in the DB",
+            `GET /api/discovery/tags returned ${allTagsStatus}`));
     }
 
     // Non-existent slug must return 404
@@ -214,10 +269,14 @@ async function tagSlugLookupTests(onStart?: (name: string) => void): Promise<Tes
     // Language-filtered tag lookup
     if (englishTag) {
         const { status, json } = await apiGet(`/discovery/tags/s/${encodeURIComponent(englishTag.slug)}?lang=en`);
-        results.push(await runTest("Tag lookup with lang=en filter returns 200", async () => {
+        results.push(await runTest(LANG_FILTERED_LOOKUP_TESTS[0], async () => {
             assert(status === 200, `Expected 200, got ${status}`);
             assert(Array.isArray(json), "Expected array");
         }, onStart));
+    } else {
+        results.push(...unrunResults(LANG_FILTERED_LOOKUP_TESTS, tagsOk,
+            "no English tags with content in the DB",
+            `GET /api/discovery/tags returned ${allTagsStatus}`));
     }
 
     return results;
@@ -247,34 +306,34 @@ async function tagPageLanguageTests(onStart?: (name: string) => void): Promise<T
     if (workingHeTag) {
         // Hebrew tag page via /he/cat/:slug
         const hePageRes = await httpGet(`/he/cat/${encodeURIComponent(workingHeTag)}`, { "User-Agent": botUA });
-        results.push(await runTest(`Hebrew tag page (/he/cat/${workingHeTag.substring(0, 20)}): bot gets HTML`, async () => {
-            assert(hePageRes.status === 200, `Expected 200, got ${hePageRes.status}`);
+        results.push(await runTest(HEBREW_TAG_PAGE_TESTS[0], async () => {
+            assert(hePageRes.status === 200, `Expected 200 for /he/cat/${workingHeTag}, got ${hePageRes.status}`);
             assert(hePageRes.text.includes("<!DOCTYPE html>"), "Expected prerendered HTML");
         }, onStart));
 
-        results.push(await runTest("Hebrew tag page: has Hebrew lang attribute", async () => {
+        results.push(await runTest(HEBREW_TAG_PAGE_TESTS[1], async () => {
             assert(hePageRes.text.includes('lang="he"'), `Expected lang="he" in HTML`);
         }, onStart));
 
-        results.push(await runTest("Hebrew tag page: has RTL direction", async () => {
+        results.push(await runTest(HEBREW_TAG_PAGE_TESTS[2], async () => {
             assert(hePageRes.text.includes('dir="rtl"'), `Expected dir="rtl" in HTML`);
         }, onStart));
 
-        results.push(await runTest("Hebrew tag page: has OG meta tags", async () => {
+        results.push(await runTest(HEBREW_TAG_PAGE_TESTS[3], async () => {
             assert(hePageRes.text.includes('property="og:title"'), "Missing og:title");
             assert(hePageRes.text.includes('property="og:description"'), "Missing og:description");
         }, onStart));
 
         // Same tag at the non-prefixed /cat/ path
         const defaultPageRes = await httpGet(`/cat/${encodeURIComponent(workingHeTag)}`, { "User-Agent": botUA });
-        results.push(await runTest("Hebrew tag via /cat/ (no lang prefix): returns HTML", async () => {
+        results.push(await runTest(HEBREW_TAG_PAGE_TESTS[4], async () => {
             assert(defaultPageRes.status === 200, `Expected 200, got ${defaultPageRes.status}`);
             assert(defaultPageRes.text.includes("<!DOCTYPE html>"), "Expected prerendered HTML");
         }, onStart));
     } else {
-        results.push(await runTest("Hebrew tag page prerender tests (SKIPPED — no Hebrew tags with content)", async () => {
-            // pass
-        }, onStart));
+        results.push(...unrunResults(HEBREW_TAG_PAGE_TESTS, heTagsSitemap.status === 200,
+            "no Hebrew tags with content",
+            `/sitemap-tags-he.xml returned ${heTagsSitemap.status}`));
     }
 
     // Discover an English tag
@@ -285,25 +344,25 @@ async function tagPageLanguageTests(onStart?: (name: string) => void): Promise<T
     if (enTagSlug) {
         // /he/cat/<english-tag> should still return 200 (Hebrew UI, English tag)
         const heMixedRes = await httpGet(`/he/cat/${enTagSlug}`, { "User-Agent": botUA });
-        results.push(await runTest(`/he/cat/ with English tag slug: returns 200`, async () => {
+        results.push(await runTest(CROSS_LANGUAGE_TAG_PAGE_TESTS[0], async () => {
             assert(heMixedRes.status === 200, `Expected 200, got ${heMixedRes.status}`);
             assert(heMixedRes.text.includes("<!DOCTYPE html>"), "Expected prerendered HTML");
         }, onStart));
 
-        results.push(await runTest("/he/cat/ with English tag slug: has Hebrew lang attribute", async () => {
+        results.push(await runTest(CROSS_LANGUAGE_TAG_PAGE_TESTS[1], async () => {
             assert(heMixedRes.text.includes('lang="he"'), `Expected lang="he"`);
         }, onStart));
 
         // /en/cat/<slug> should use English lang
         const enPageRes = await httpGet(`/en/cat/${enTagSlug}`, { "User-Agent": botUA });
-        results.push(await runTest(`/en/cat/ tag page: has English lang attribute`, async () => {
+        results.push(await runTest(CROSS_LANGUAGE_TAG_PAGE_TESTS[2], async () => {
             assert(enPageRes.status === 200, `Expected 200, got ${enPageRes.status}`);
             assert(enPageRes.text.includes('lang="en"'), `Expected lang="en"`);
         }, onStart));
     } else {
-        results.push(await runTest("Cross-language tag page tests (SKIPPED — no English tags in sitemap)", async () => {
-            // pass
-        }, onStart));
+        results.push(...unrunResults(CROSS_LANGUAGE_TAG_PAGE_TESTS, enTagsSitemap.status === 200,
+            "no English tags in /sitemap-tags-en.xml",
+            `/sitemap-tags-en.xml returned ${enTagsSitemap.status}`));
     }
 
     return results;
@@ -316,7 +375,7 @@ async function tagPageLanguageTests(onStart?: (name: string) => void): Promise<T
 async function slugIntegrityTests(onStart?: (name: string) => void): Promise<TestResult[]> {
     const results: TestResult[] = [];
 
-    const { json: allTags } = await apiGet("/discovery/tags");
+    const { status: allTagsStatus, json: allTags } = await apiGet("/discovery/tags");
     const tags: any[] = Array.isArray(allTags) ? allTags : [];
 
     results.push(await runTest("All tags in DB have non-empty slugs", async () => {
@@ -333,7 +392,7 @@ async function slugIntegrityTests(onStart?: (name: string) => void): Promise<Tes
 
     const nonAsciiTags = tags.filter((t: any) => /[^\x00-\x7F]/.test(t.name));
     if (nonAsciiTags.length > 0) {
-        results.push(await runTest("Non-ASCII tag names produce slugs that contain at least one non-ASCII or digit char", async () => {
+        results.push(await runTest(NON_ASCII_SLUG_INTEGRITY_TESTS[0], async () => {
             for (const tag of nonAsciiTags) {
                 const slug = tag.slug || "";
                 const hasContent = /[^\x00-\x7F\-_]/.test(slug); // has a non-ASCII or non-hyphen character
@@ -342,9 +401,9 @@ async function slugIntegrityTests(onStart?: (name: string) => void): Promise<Tes
             }
         }, nonAsciiTags, onStart));
     } else {
-        results.push(await runTest("Non-ASCII slug integrity (SKIPPED — no non-ASCII tags)", async () => {
-            // pass
-        }, onStart));
+        results.push(...unrunResults(NON_ASCII_SLUG_INTEGRITY_TESTS, allTagsStatus === 200,
+            "no non-ASCII tags in the DB",
+            `GET /api/discovery/tags returned ${allTagsStatus}`));
     }
 
     return results;
@@ -357,7 +416,6 @@ async function slugIntegrityTests(onStart?: (name: string) => void): Promise<Tes
 export const tagsTestCategory: TestCategory = {
     name: "Tags",
     description: "Tag API endpoints, Hebrew/non-ASCII slug integrity, language-filtered discovery, and multilingual tag page rendering",
-    testCount: 30,
     run: async (onResult, onStart) => {
         const results: TestResult[] = [];
         const emit = (r: TestResult) => { results.push(r); onResult?.(r); };

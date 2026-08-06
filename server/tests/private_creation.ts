@@ -9,10 +9,21 @@ import jwt from "jsonwebtoken";
 import { TestCategory, TestResult } from "./types";
 import { supabase } from "../supabase";
 import { testFetch } from "./self_request";
+import { failedResults } from "./result";
 
 // NOTE: requests go through testFetch() — on Workers a self-fetch over the network
 // returns an instant 522, so it dispatches in-isolate instead. See ./self_request.
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+
+// Declared statically so the downstream tests still report one result each when the
+// fixture story can't be generated, instead of collapsing into a single line.
+const GENERATION_TEST = "Private story: generation returns 200 with valid response";
+const PRIVATE_STORY_DOWNSTREAM_TESTS = [
+    "Private story: anonymous access returns 403",
+    "Private story: different user access returns 403",
+    "Private story: owner access returns 200",
+    "Private story: excluded from /api/discovery/public",
+] as const;
 
 async function httpGet(path: string, cookie?: string): Promise<{ status: number; body: any }> {
     const res = await testFetch(path, {
@@ -100,7 +111,8 @@ async function privateStoryRoundTripTests(onStart?: (name: string) => void): Pro
     });
 
     if (createError || !authData?.user) {
-        emit({ name: "Private story: remaining tests skipped (generation failed)", passed: false, message: `Could not create test user: ${createError?.message ?? "unknown error"}`, durationMs: 0 });
+        const reason = `could not create the test user: ${createError?.message ?? "unknown error"}`;
+        for (const r of failedResults([GENERATION_TEST, ...PRIVATE_STORY_DOWNSTREAM_TESTS], reason)) emit(r);
         return results;
     }
 
@@ -112,7 +124,7 @@ async function privateStoryRoundTripTests(onStart?: (name: string) => void): Pro
     let storyId: string | null = null;
 
     // Step 1: Generate a private story
-    const genResult = await runTest("Private story: generation returns 200 with valid response", async () => {
+    const genResult = await runTest(GENERATION_TEST, async () => {
         const { status, body } = await httpPost(
             "/api/generate-story",
             { ...BASE_STORY_PAYLOAD, visibility: "private" },
@@ -128,32 +140,33 @@ async function privateStoryRoundTripTests(onStart?: (name: string) => void): Pro
 
     if (!slug) {
         await cleanup();
-        emit({ name: "Private story: remaining tests skipped (generation failed)", passed: false, message: "Story generation failed — cannot run downstream tests", durationMs: 0 });
+        for (const r of failedResults(PRIVATE_STORY_DOWNSTREAM_TESTS,
+            "the fixture story could not be generated, so access control could not be exercised")) emit(r);
         return results;
     }
 
     // Step 2: Anonymous access → 403
-    emit(await runTest("Private story: anonymous access returns 403", async () => {
+    emit(await runTest(PRIVATE_STORY_DOWNSTREAM_TESTS[0], async () => {
         const { status, body } = await httpGet(`/api/stories/s/${slug}`);
         assert(status === 403, `Expected 403 for anonymous access, got ${status}: ${JSON.stringify(body)}`);
     }, undefined, onStart));
 
     // Step 3: Different user's access → 403
     const otherToken = jwt.sign({ id: "00000000-0000-0000-0000-000000000099", email: "other@quickstory.ai" }, JWT_SECRET);
-    emit(await runTest("Private story: different user access returns 403", async () => {
+    emit(await runTest(PRIVATE_STORY_DOWNSTREAM_TESTS[1], async () => {
         const { status } = await httpGet(`/api/stories/s/${slug}`, `token=${otherToken}`);
         assert(status === 403, `Expected 403 for different user, got ${status}`);
     }, undefined, onStart));
 
     // Step 4: Owner access → 200
-    emit(await runTest("Private story: owner access returns 200", async () => {
+    emit(await runTest(PRIVATE_STORY_DOWNSTREAM_TESTS[2], async () => {
         const { status, body } = await httpGet(`/api/stories/s/${slug}`, AUTH_COOKIE);
         assert(status === 200, `Expected 200 for owner, got ${status}: ${JSON.stringify(body)}`);
         assert(body.slug === slug, `Expected slug ${slug}, got ${body.slug}`);
     }, undefined, onStart));
 
     // Step 5: Not in Discovery
-    emit(await runTest("Private story: excluded from /api/discovery/public", async () => {
+    emit(await runTest(PRIVATE_STORY_DOWNSTREAM_TESTS[3], async () => {
         const { status, body } = await httpGet("/api/discovery/public?limit=100");
         assert(status === 200, `Discovery endpoint returned ${status}`);
         assert(Array.isArray(body), "Discovery response is not an array");
@@ -174,7 +187,6 @@ async function privateStoryRoundTripTests(onStart?: (name: string) => void): Pro
 export const privateCreationTestCategory: TestCategory = {
     name: "Private Creations",
     description: "Verifies that private stories are access-controlled (403 for non-owners) and excluded from public Discovery. Generates a real private story end-to-end.",
-    testCount: 7,
     run: async (onResult, onStart) => {
         const results: TestResult[] = [];
         const emit = (r: TestResult) => { results.push(r); onResult?.(r); };

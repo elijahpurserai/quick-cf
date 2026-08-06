@@ -7,6 +7,14 @@
 import OpenAI from "openai";
 import { TestCategory, TestResult } from "./types";
 import { OPENAI_MODEL } from "../config";
+import {
+    USER_STORY_SYSTEM_PROMPT,
+    USER_STORY_USER_PROMPT,
+    USER_LESSON_SYSTEM_PROMPT,
+    USER_LESSON_USER_PROMPT,
+    interpolatePrompt,
+} from "../prompts";
+import { getStoryLengthGuidance } from "../routes";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -46,40 +54,40 @@ interface GeneratedLesson {
     tags?: string[];
 }
 
-async function generateStoryDryRun(): Promise<GeneratedStory> {
-    const systemPrompt = `You are a world-class children's storyteller and SEO specialist. You create magical, engaging stories that are also highly discoverable.
-    
-    CRITICAL SEO INSTRUCTIONS:
-    - "englishTitle": This must be a SEARCH-OPTIMIZED title that someone would type into Google. 
-      Format: [Type of Content/Main Topic] for [Age Group] - [Creative Subtitle]
-      Example: "Bedtime Story About Dragons for 5 Year Olds - The Purple Adventure"
-    - "title": This is the CREATIVE, magical on-page title (e.g., "The Purple Adventure").
-    - "description": This must be an SEO-optimized meta description (150-160 characters).
-    
-    STORY CONTENT INSTRUCTIONS:
-    - Incorporate specific details about the child, their family, and their pets.
-    - Structure into 3-5 mini-chapters with '### [Emoji] Chapter Name'.
-    - Use a few emojis sparingly for magic.
-    
-    Return the response as a valid JSON object:
-    {
-      "title": "Creative On-Page Title",
-      "englishTitle": "Search-Optimized SEO Title",
-      "description": "SEO Meta Description",
-      "content": "Full story content with markdown formatting",
-      "tags": ["tag1", "tag2"]
-    }`;
+/**
+ * Both dry runs use the REAL production prompts from ../prompts, interpolated exactly
+ * as routes.ts does. They used to carry their own inline copies, which drifted: the
+ * shipped story prompt says "EXACTLY '### [Emoji] Section Name' ... Do not use # or ##",
+ * while the test's copy only said "Structure into 3-5 mini-chapters with '### ...'".
+ * That made "content has chapter structure" fail against a prompt that is not shipped.
+ * If a prompt changes, this suite must exercise the change — so never inline them again.
+ */
 
-    const userPrompt = `Generate a bedtime story for:
-- Child: Test Child, Gender male, Age 5
-- Purpose: bedtime
-- Educational Category: General
-- Siblings: None
-- Pets: None
-- Parent(s): None
-- Estimated Duration: 5 minutes
-- Extra Details: None
-- Language: en`;
+const DRY_RUN_DURATION = 5;
+
+async function generateStoryDryRun(): Promise<GeneratedStory> {
+    const { targetWords, chapters } = getStoryLengthGuidance(DRY_RUN_DURATION);
+
+    const systemPrompt = interpolatePrompt(USER_STORY_SYSTEM_PROMPT, {
+        targetWords,
+        duration: DRY_RUN_DURATION,
+        chapters,
+    });
+
+    const userPrompt = interpolatePrompt(USER_STORY_USER_PROMPT, {
+        childName: "Test Child",
+        gender: "male",
+        age: 5,
+        purpose: "bedtime",
+        educationCategory: "General",
+        siblings: "None",
+        pets: "None",
+        parents: "None",
+        targetWords,
+        duration: DRY_RUN_DURATION,
+        additionalInfo: "None",
+        language: "en",
+    });
 
     const completion = await openai.chat.completions.create({
         model: OPENAI_MODEL,
@@ -96,33 +104,22 @@ async function generateStoryDryRun(): Promise<GeneratedStory> {
 }
 
 async function generateLessonDryRun(): Promise<GeneratedLesson> {
-    const systemPrompt = `You are an expert educator and SEO specialist who simplifies complex topics for all ages.
-    
-    CRITICAL SEO INSTRUCTIONS:
-    - "englishTitle": Search-optimized title.
-    - "title": Creative on-page title.
-    - "description": SEO meta description (150-160 characters).
-    
-    CONTENT INSTRUCTIONS:
-    - Provide rich, descriptive paragraphs. Minimize bullet points.
-    - Use Markdown for formatting.
-    
-    Return the response as a valid JSON object:
-    {
-      "title": "Creative On-Page Title",
-      "englishTitle": "Search-Optimized SEO Title",
-      "description": "SEO Meta Description",
-      "content": "Full lesson content with markdown formatting",
-      "tags": ["tag1", "tag2"]
-    }`;
+    const { targetWords } = getStoryLengthGuidance(DRY_RUN_DURATION);
 
-    const userPrompt = `Create a quick lesson about:
-- Topic: Why the sky is blue
-- Level: Ages 6-10
-- Tone: Fun and playful
-- Reading Duration: 5 minutes
-- Extra Focus: None
-- Language: en`;
+    const systemPrompt = interpolatePrompt(USER_LESSON_SYSTEM_PROMPT, {
+        targetWords,
+        duration: DRY_RUN_DURATION,
+    });
+
+    const userPrompt = interpolatePrompt(USER_LESSON_USER_PROMPT, {
+        topic: "Why the sky is blue",
+        level: "Ages 6-10",
+        tone: "Fun and playful",
+        targetWords,
+        duration: DRY_RUN_DURATION,
+        additionalInfo: "None",
+        language: "en",
+    });
 
     const completion = await openai.chat.completions.create({
         model: OPENAI_MODEL,
@@ -273,7 +270,6 @@ async function lessonGenerationTests(onStart?: (name: string) => void): Promise<
 export const generationTestCategory: TestCategory = {
     name: "Content Generation",
     description: "Tests story and lesson generation via OpenAI without saving to the database. Validates JSON structure, SEO fields, and content quality.",
-    testCount: 17,
     run: async (onResult, onStart) => {
         const results: TestResult[] = [];
         const emit = (r: TestResult) => { results.push(r); onResult?.(r); };

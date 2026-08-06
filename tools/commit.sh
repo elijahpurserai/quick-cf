@@ -84,8 +84,12 @@ info "Asking Claude for a commit message..."
 MSG="$(printf '%s' "$PROMPT" | claude -p 2>/dev/null || true)"
 
 # Strip markdown fences and leading/trailing blank lines, in case they slip through.
+# Also drop a leading conversational preamble line ("Here's the commit message:") —
+# the prompt forbids it, but it slipped through once and became a commit subject.
 MSG="$(printf '%s\n' "$MSG" \
   | sed -e '/^[[:space:]]*```[a-zA-Z]*[[:space:]]*$/d' \
+  | sed -e '/./,$!d' \
+  | awk 'BEGIN{drop=1} drop==1 && tolower($0) ~ /^(here.?s|sure|okay|ok|certainly)[^:]*:[[:space:]]*$/ {next} {drop=0; print}' \
   | sed -e '/./,$!d' \
   | awk 'BEGIN{n=0} {lines[n++]=$0} END{last=n-1; while(last>=0 && lines[last]~/^[[:space:]]*$/) last--; for(i=0;i<=last;i++) print lines[i]}')"
 

@@ -91,7 +91,10 @@ const generateSlug = (text: string) => {
  * Maps a reading duration (minutes) to a target word count and chapter range.
  * Based on ~150 words per minute for children's read-aloud pace.
  */
-const getStoryLengthGuidance = (durationMinutes: number) => {
+// Exported so the in-app test suite (server/tests/generation.ts) derives the same
+// targetWords/chapters the real routes do, instead of hardcoding its own values.
+// NOTE: server/generator.ts still keeps an identical private copy — worth unifying.
+export const getStoryLengthGuidance = (durationMinutes: number) => {
     const wordsPerMinute = 150;
     const targetWords = durationMinutes * wordsPerMinute;
 

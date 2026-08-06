@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { Play, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, Loader2, Shield, Eye, Copy, ClipboardCheck } from "lucide-react";
+import { Play, CheckCircle, XCircle, MinusCircle, Clock, ChevronDown, ChevronUp, Loader2, Shield, Eye, Copy, ClipboardCheck } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useApp } from "../contexts/AppContext";
 import { setNoIndex } from "../utils/seo";
@@ -10,6 +10,8 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
 interface TestResult {
     name: string;
     passed: boolean;
+    /** Test could not run because its fixture was absent. Not a failure. */
+    skipped?: boolean;
     message: string;
     durationMs: number;
     details?: any;
@@ -20,6 +22,7 @@ interface CategoryResult {
     results: TestResult[];
     passed: number;
     failed: number;
+    skipped: number;
     running?: boolean; // true while category is still in progress
     currentTest?: string; // name of the test currently running
 }
@@ -27,7 +30,6 @@ interface CategoryResult {
 interface AvailableCategory {
     name: string;
     description: string;
-    testCount: number;
 }
 
 export function TestsPage() {
@@ -41,6 +43,7 @@ export function TestsPage() {
     const [error, setError] = useState<string | null>(null);
     const [totalPassed, setTotalPassed] = useState(0);
     const [totalFailed, setTotalFailed] = useState(0);
+    const [totalSkipped, setTotalSkipped] = useState(0);
     const [totalDurationMs, setTotalDurationMs] = useState(0);
     const [isDone, setIsDone] = useState(false);
     const [detailsModal, setDetailsModal] = useState<{ name: string; data: any } | null>(null);
@@ -113,7 +116,7 @@ export function TestsPage() {
         const lines: string[] = [];
         lines.push("TEST RESULTS SUMMARY");
         lines.push("====================");
-        lines.push(`Total: ${totalPassed + totalFailed} | Passed: ${totalPassed} | Failed: ${totalFailed} | Duration: ${(totalDurationMs / 1000).toFixed(1)}s`);
+        lines.push(`Total: ${totalPassed + totalFailed + totalSkipped} | Passed: ${totalPassed} | Failed: ${totalFailed}${totalSkipped > 0 ? ` | Skipped: ${totalSkipped}` : ""} | Duration: ${(totalDurationMs / 1000).toFixed(1)}s`);
         lines.push("");
 
         // Only list failed tests — passed tests are just counted above
@@ -123,13 +126,29 @@ export function TestsPage() {
             lines.push("");
             for (const cat of failedCategories) {
                 lines.push(`[${cat.name}]`);
-                for (const test of cat.results.filter(t => !t.passed)) {
+                for (const test of cat.results.filter(t => !t.passed && !t.skipped)) {
                     lines.push(`  ✗ ${test.name} — ${test.message}`);
                 }
                 lines.push("");
             }
         } else {
             lines.push("✅ All tests passed!");
+        }
+
+        // Skipped tests are listed too — a skip means a fixture was missing, which is
+        // worth seeing even though it is not a failure.
+        const skippedCategories = categoryResults.filter(c => c.skipped > 0);
+        if (skippedCategories.length > 0) {
+            lines.push("");
+            lines.push("⊘ SKIPPED TESTS:");
+            lines.push("");
+            for (const cat of skippedCategories) {
+                lines.push(`[${cat.name}]`);
+                for (const test of cat.results.filter(t => t.skipped)) {
+                    lines.push(`  ⊘ ${test.name} — ${test.message}`);
+                }
+                lines.push("");
+            }
         }
 
         return lines.join("\n");
@@ -162,6 +181,7 @@ export function TestsPage() {
         setError(null);
         setTotalPassed(0);
         setTotalFailed(0);
+        setTotalSkipped(0);
         setTotalDurationMs(0);
         setIsDone(false);
         setExpandedCategories(new Set());
@@ -213,7 +233,7 @@ export function TestsPage() {
             case "category_start":
                 setCategoryResults(prev => [
                     ...prev,
-                    { name: data.category, results: [], passed: 0, failed: 0, running: true },
+                    { name: data.category, results: [], passed: 0, failed: 0, skipped: 0, running: true },
                 ]);
                 setExpandedCategories(prev => new Set([...prev, data.category]));
                 break;
@@ -235,7 +255,8 @@ export function TestsPage() {
                             currentTest: undefined,
                             results: [...cat.results, data.result],
                             passed: cat.passed + (data.result.passed ? 1 : 0),
-                            failed: cat.failed + (data.result.passed ? 0 : 1),
+                            failed: cat.failed + (!data.result.passed && !data.result.skipped ? 1 : 0),
+                            skipped: cat.skipped + (data.result.skipped ? 1 : 0),
                         };
                     })
                 );
@@ -252,6 +273,7 @@ export function TestsPage() {
             case "done":
                 setTotalPassed(data.totalPassed);
                 setTotalFailed(data.totalFailed);
+                setTotalSkipped(data.totalSkipped ?? 0);
                 setTotalDurationMs(data.totalDurationMs);
                 setIsDone(true);
                 setIsRunning(false);
@@ -318,11 +340,9 @@ export function TestsPage() {
                                     <span className="font-medium text-gray-900">{cat.name}</span>
                                     {lastResult && !lastResult.running ? (
                                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${lastResult.failed === 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                                            {lastResult.results.length} tests · {lastResult.passed} passed{lastResult.failed > 0 ? ` · ${lastResult.failed} failed` : ""}
+                                            {lastResult.results.length} tests · {lastResult.passed} passed{lastResult.failed > 0 ? ` · ${lastResult.failed} failed` : ""}{lastResult.skipped > 0 ? ` · ${lastResult.skipped} skipped` : ""}
                                         </span>
-                                    ) : (
-                                        <span className="text-xs text-gray-400">{cat.testCount} tests</span>
-                                    )}
+                                    ) : null}
                                 </div>
                                 <p className="text-sm text-gray-500">{cat.description}</p>
                             </div>
@@ -382,7 +402,7 @@ export function TestsPage() {
                                             }
                                         </h3>
                                         <p className="text-sm text-gray-600">
-                                            {totalPassed} passed · {totalFailed} failed · {totalDurationMs}ms total
+                                            {totalPassed} passed · {totalFailed} failed{totalSkipped > 0 ? ` · ${totalSkipped} skipped` : ""} · {totalDurationMs}ms total
                                         </p>
                                     </div>
                                 </div>
@@ -447,7 +467,7 @@ export function TestsPage() {
                                         <span className="font-semibold text-gray-900">{cat.name}</span>
                                         <span className="text-sm text-gray-500">
                                             {cat.results.length} test{cat.results.length !== 1 ? "s" : ""}
-                                            {cat.running ? " (running...)" : ` · ${cat.passed} passed${cat.failed > 0 ? `, ${cat.failed} failed` : ""}`}
+                                            {cat.running ? " (running...)" : ` · ${cat.passed} passed${cat.failed > 0 ? `, ${cat.failed} failed` : ""}${cat.skipped > 0 ? `, ${cat.skipped} skipped` : ""}`}
                                         </span>
                                     </div>
                                     {expandedCategories.has(cat.name) ? (
@@ -473,11 +493,13 @@ export function TestsPage() {
                                                 {cat.results.map((test, i) => (
                                                     <tr
                                                         key={i}
-                                                        className={`border-t border-gray-50 ${!test.passed ? "bg-red-50/50" : ""
+                                                        className={`border-t border-gray-50 ${test.skipped ? "bg-amber-50/40" : !test.passed ? "bg-red-50/50" : ""
                                                             } animate-fade-in`}
                                                     >
                                                         <td className="px-4 py-2.5">
-                                                            {test.passed ? (
+                                                            {test.skipped ? (
+                                                                <MinusCircle className="size-4 text-amber-500" />
+                                                            ) : test.passed ? (
                                                                 <CheckCircle className="size-4 text-green-500" />
                                                             ) : (
                                                                 <XCircle className="size-4 text-red-500" />
@@ -502,7 +524,9 @@ export function TestsPage() {
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-2.5 text-gray-500 max-w-xs truncate">
-                                                            {test.passed ? (
+                                                            {test.skipped ? (
+                                                                <span className="text-amber-600">{test.message}</span>
+                                                            ) : test.passed ? (
                                                                 <span className="text-green-600">Passed</span>
                                                             ) : (
                                                                 <span className="text-red-600">{test.message}</span>

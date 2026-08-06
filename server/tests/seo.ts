@@ -6,6 +6,7 @@
 
 import { TestCategory, TestResult } from "./types";
 import { testFetch } from "./self_request";
+import { unrunResults } from "./result";
 
 // NOTE: requests go through testFetch() — on Workers a self-fetch over the network
 // returns an instant 522, so it dispatches in-isolate instead. See ./self_request.
@@ -190,10 +191,145 @@ async function contentSitemapTests(onStart?: (name: string) => void): Promise<Te
     return results;
 }
 
+// Test names are declared statically so a block whose fixture is missing can still
+// emit one result per test. Slugs live in assertion messages, not in names, so the
+// rows stay stable between runs.
+const STORY_PRERENDER_TESTS = [
+    "Bot prerender: story page returns HTML",
+    "Bot prerender: story has OG meta tags",
+    "Bot prerender: og:image has a non-empty URL",
+    "Bot prerender: story has Twitter card tags",
+    "Bot prerender: story has lang attribute",
+    "Bot prerender: WhatsApp user-agent triggers prerender",
+    "Bot prerender: Google-InspectionTool (Search Console) triggers prerender",
+    "Regular browser does NOT get prerendered HTML",
+] as const;
+
+const LANG_STORY_PRERENDER_TESTS = [
+    "Bot prerender: language-prefixed URL works",
+    "Regular browser on language-prefixed URL gets SPA, not prerender",
+] as const;
+
+const LESSON_PRERENDER_TESTS = [
+    "Bot prerender: lesson page returns HTML",
+    "Bot prerender: lesson has OG + Twitter tags",
+] as const;
+
+async function storyPrerenderTests(storySlug: string, onStart?: (name: string) => void): Promise<TestResult[]> {
+    const results: TestResult[] = [];
+    const where = `story/${storySlug}`;
+
+    const botRes = await httpGet(`/story/${storySlug}`, {
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    });
+
+    results.push(await runTest(STORY_PRERENDER_TESTS[0], async () => {
+        assert(botRes.status === 200, `Expected 200 for ${where}, got ${botRes.status}`);
+        assertContains(botRes.text, "<!DOCTYPE html>", "prerendered HTML");
+        assertContains(botRes.text, "| Quick Story</title>", "prerendered title");
+    }, onStart));
+
+    results.push(await runTest(STORY_PRERENDER_TESTS[1], async () => {
+        assertContains(botRes.text, 'property="og:title"', "prerendered OG");
+        assertContains(botRes.text, 'property="og:description"', "prerendered OG");
+        assertContains(botRes.text, 'property="og:type" content="article"', "prerendered OG");
+        assertContains(botRes.text, 'property="og:image"', "prerendered OG");
+    }, onStart));
+
+    results.push(await runTest(STORY_PRERENDER_TESTS[2], async () => {
+        const match = botRes.text.match(/property="og:image"\s+content="([^"]+)"/);
+        assert(!!match, `og:image tag not found or has no content attribute on ${where}`);
+        assert(match![1].startsWith("http"), `og:image URL should start with http, got: "${match![1]}"`);
+    }, onStart));
+
+    results.push(await runTest(STORY_PRERENDER_TESTS[3], async () => {
+        assertContains(botRes.text, 'name="twitter:card" content="summary_large_image"', "prerendered Twitter");
+        assertContains(botRes.text, 'name="twitter:title"', "prerendered Twitter");
+        assertContains(botRes.text, 'name="twitter:image"', "prerendered Twitter");
+    }, onStart));
+
+    results.push(await runTest(STORY_PRERENDER_TESTS[4], async () => {
+        assertMatches(botRes.text, /<html lang="[a-z]{2}">/, "prerendered HTML");
+    }, onStart));
+
+    const whatsappRes = await httpGet(`/story/${storySlug}`, {
+        "User-Agent": "WhatsApp/2.0 (+http://www.whatsapp.com/)"
+    });
+    results.push(await runTest(STORY_PRERENDER_TESTS[5], async () => {
+        assert(whatsappRes.status === 200, `Expected 200 for ${where}, got ${whatsappRes.status}`);
+        assertContains(whatsappRes.text, 'property="og:image"', "WhatsApp prerender");
+        assertContains(whatsappRes.text, 'property="og:title"', "WhatsApp prerender");
+    }, onStart));
+
+    // Google-InspectionTool is used by Google Search Console to verify how Google renders a page
+    const gscRes = await httpGet(`/story/${storySlug}`, {
+        "User-Agent": "Mozilla/5.0 (compatible; Google-InspectionTool/1.0)"
+    });
+    results.push(await runTest(STORY_PRERENDER_TESTS[6], async () => {
+        assert(gscRes.status === 200, `Expected 200 for ${where}, got ${gscRes.status}`);
+        assertContains(gscRes.text, 'property="og:title"', "Google-InspectionTool prerender");
+        assertContains(gscRes.text, 'property="og:image"', "Google-InspectionTool prerender");
+        assertContains(gscRes.text, "| Quick Story</title>", "Google-InspectionTool prerender");
+    }, onStart));
+
+    const browserRes = await httpGet(`/story/${storySlug}`, {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    });
+    results.push(await runTest(STORY_PRERENDER_TESTS[7], async () => {
+        assertNotContains(browserRes.text, "| Quick Story</title>", "browser response");
+    }, onStart));
+
+    return results;
+}
+
+async function langStoryPrerenderTests(langStoryPath: string, onStart?: (name: string) => void): Promise<TestResult[]> {
+    const results: TestResult[] = [];
+
+    const langBotRes = await httpGet(langStoryPath, {
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    });
+    results.push(await runTest(LANG_STORY_PRERENDER_TESTS[0], async () => {
+        assert(langBotRes.status === 200, `Expected 200 for ${langStoryPath}, got ${langBotRes.status}`);
+        assertContains(langBotRes.text, 'property="og:image"', "lang-prefixed prerender");
+        assertContains(langBotRes.text, 'property="og:title"', "lang-prefixed prerender");
+    }, onStart));
+
+    const langBrowserRes = await httpGet(langStoryPath, {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    });
+    results.push(await runTest(LANG_STORY_PRERENDER_TESTS[1], async () => {
+        assertNotContains(langBrowserRes.text, "| Quick Story</title>", `browser response on ${langStoryPath}`);
+    }, onStart));
+
+    return results;
+}
+
+async function lessonPrerenderTests(lessonSlug: string, onStart?: (name: string) => void): Promise<TestResult[]> {
+    const results: TestResult[] = [];
+    const where = `lesson/${lessonSlug}`;
+
+    const botRes = await httpGet(`/lesson/${lessonSlug}`, {
+        "User-Agent": "facebookexternalhit/1.1"
+    });
+
+    results.push(await runTest(LESSON_PRERENDER_TESTS[0], async () => {
+        assert(botRes.status === 200, `Expected 200 for ${where}, got ${botRes.status}`);
+        assertContains(botRes.text, "<!DOCTYPE html>", "prerendered HTML");
+        assertContains(botRes.text, "| Quick Lesson</title>", "prerendered title");
+    }, onStart));
+
+    results.push(await runTest(LESSON_PRERENDER_TESTS[1], async () => {
+        assertContains(botRes.text, 'property="og:type" content="article"', "prerendered OG");
+        assertContains(botRes.text, 'name="twitter:card" content="summary_large_image"', "prerendered Twitter");
+    }, onStart));
+
+    return results;
+}
+
 async function botPrerenderTests(onStart?: (name: string) => void): Promise<TestResult[]> {
     const results: TestResult[] = [];
 
-    // Discover a real story and lesson slug from the sitemaps
+    // Discover a real story and lesson slug from the sitemaps.
     const storiesRes = await httpGet("/sitemap-stories.xml");
     const storyMatch = storiesRes.text.match(/\/story\/([^<]+)</);
     const storySlug = storyMatch ? storyMatch[1] : null;
@@ -206,125 +342,28 @@ async function botPrerenderTests(onStart?: (name: string) => void): Promise<Test
     const lessonMatch = lessonsRes.text.match(/\/lesson\/([^<]+)</);
     const lessonSlug = lessonMatch ? lessonMatch[1] : null;
 
-    if (storySlug) {
-        const botRes = await httpGet(`/story/${storySlug}`, {
-            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-        });
+    const storiesOk = storiesRes.status === 200;
+    const lessonsOk = lessonsRes.status === 200;
 
-        results.push(await runTest(`Bot prerender: story page returns HTML (${storySlug.substring(0, 30)}...)`, async () => {
-            assert(botRes.status === 200, `Expected 200, got ${botRes.status}`);
-            assertContains(botRes.text, "<!DOCTYPE html>", "prerendered HTML");
-            assertContains(botRes.text, "| Quick Story</title>", "prerendered title");
-        }, onStart));
+    results.push(...(storySlug
+        ? await storyPrerenderTests(storySlug, onStart)
+        : unrunResults(STORY_PRERENDER_TESTS, storiesOk,
+            "no stories in /sitemap-stories.xml",
+            `/sitemap-stories.xml returned ${storiesRes.status}, so no story slug could be discovered`)));
 
-        results.push(await runTest("Bot prerender: story has OG meta tags", async () => {
-            assertContains(botRes.text, 'property="og:title"', "prerendered OG");
-            assertContains(botRes.text, 'property="og:description"', "prerendered OG");
-            assertContains(botRes.text, 'property="og:type" content="article"', "prerendered OG");
-            assertContains(botRes.text, 'property="og:image"', "prerendered OG");
-        }, onStart));
+    results.push(...(langStoryPath
+        ? await langStoryPrerenderTests(langStoryPath, onStart)
+        : unrunResults(LANG_STORY_PRERENDER_TESTS, storiesOk,
+            "no language-prefixed story URLs in /sitemap-stories.xml",
+            `/sitemap-stories.xml returned ${storiesRes.status}, so no language-prefixed story URL could be discovered`)));
 
-        results.push(await runTest("Bot prerender: og:image has a non-empty URL", async () => {
-            const match = botRes.text.match(/property="og:image"\s+content="([^"]+)"/);
-            assert(!!match, 'og:image tag not found or has no content attribute');
-            assert(match![1].startsWith("http"), `og:image URL should start with http, got: "${match![1]}"`);
-        }, onStart));
+    results.push(...(lessonSlug
+        ? await lessonPrerenderTests(lessonSlug, onStart)
+        : unrunResults(LESSON_PRERENDER_TESTS, lessonsOk,
+            "no lessons in /sitemap-lessons.xml",
+            `/sitemap-lessons.xml returned ${lessonsRes.status}, so no lesson slug could be discovered`)));
 
-        results.push(await runTest("Bot prerender: story has Twitter card tags", async () => {
-            assertContains(botRes.text, 'name="twitter:card" content="summary_large_image"', "prerendered Twitter");
-            assertContains(botRes.text, 'name="twitter:title"', "prerendered Twitter");
-            assertContains(botRes.text, 'name="twitter:image"', "prerendered Twitter");
-        }, onStart));
-
-        results.push(await runTest("Bot prerender: story has lang attribute", async () => {
-            assertMatches(botRes.text, /<html lang="[a-z]{2}">/, "prerendered HTML");
-        }, onStart));
-
-        // WhatsApp user-agent must trigger prerender
-        const whatsappRes = await httpGet(`/story/${storySlug}`, {
-            "User-Agent": "WhatsApp/2.0 (+http://www.whatsapp.com/)"
-        });
-        results.push(await runTest("Bot prerender: WhatsApp user-agent triggers prerender", async () => {
-            assert(whatsappRes.status === 200, `Expected 200, got ${whatsappRes.status}`);
-            assertContains(whatsappRes.text, 'property="og:image"', "WhatsApp prerender");
-            assertContains(whatsappRes.text, 'property="og:title"', "WhatsApp prerender");
-        }, onStart));
-
-        // Google-InspectionTool is used by Google Search Console to verify how Google renders a page
-        const gscRes = await httpGet(`/story/${storySlug}`, {
-            "User-Agent": "Mozilla/5.0 (compatible; Google-InspectionTool/1.0)"
-        });
-        results.push(await runTest("Bot prerender: Google-InspectionTool (Search Console) triggers prerender", async () => {
-            assert(gscRes.status === 200, `Expected 200, got ${gscRes.status}`);
-            assertContains(gscRes.text, 'property="og:title"', "Google-InspectionTool prerender");
-            assertContains(gscRes.text, 'property="og:image"', "Google-InspectionTool prerender");
-            assertContains(gscRes.text, "| Quick Story</title>", "Google-InspectionTool prerender");
-        }, onStart));
-
-        // Non-bot should NOT get prerendered HTML
-        const browserRes = await httpGet(`/story/${storySlug}`, {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        });
-        results.push(await runTest("Regular browser does NOT get prerendered HTML", async () => {
-            assertNotContains(browserRes.text, "| Quick Story</title>", "browser response");
-        }, onStart));
-    } else {
-        results.push(await runTest("Bot prerender: story tests (SKIPPED — no stories in DB)", async () => {
-            // Only a genuinely empty sitemap is a valid skip. If the sitemap request
-            // itself failed, slug discovery never ran and the story prerender tests
-            // below were silently not exercised — fail instead of reporting green.
-            assert(storiesRes.status === 200,
-                `Cannot skip safely: /sitemap-stories.xml returned ${storiesRes.status}, so no story slug could be discovered and the story prerender tests did not run`);
-        }, onStart));
-    }
-
-    // Language-prefixed URL tests (e.g. /he/story/... or /en/story/...)
-    if (langStoryPath) {
-        const langBotRes = await httpGet(langStoryPath, {
-            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-        });
-        results.push(await runTest(`Bot prerender: language-prefixed URL works (${langStoryPath.substring(0, 35)}...)`, async () => {
-            assert(langBotRes.status === 200, `Expected 200, got ${langBotRes.status}`);
-            assertContains(langBotRes.text, 'property="og:image"', "lang-prefixed prerender");
-            assertContains(langBotRes.text, 'property="og:title"', "lang-prefixed prerender");
-        }, onStart));
-
-        const langBrowserRes = await httpGet(langStoryPath, {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        });
-        results.push(await runTest("Regular browser on language-prefixed URL gets SPA, not prerender", async () => {
-            assertNotContains(langBrowserRes.text, "| Quick Story</title>", "browser response on lang URL");
-        }, onStart));
-    } else {
-        results.push(await runTest("Bot prerender: language-prefixed URL tests (SKIPPED — no lang-prefixed stories in sitemap)", async () => {
-            assert(storiesRes.status === 200,
-                `Cannot skip safely: /sitemap-stories.xml returned ${storiesRes.status}, so no language-prefixed story URL could be discovered`);
-        }, onStart));
-    }
-
-    if (lessonSlug) {
-        const botRes = await httpGet(`/lesson/${lessonSlug}`, {
-            "User-Agent": "facebookexternalhit/1.1"
-        });
-
-        results.push(await runTest(`Bot prerender: lesson page returns HTML (${lessonSlug.substring(0, 30)}...)`, async () => {
-            assert(botRes.status === 200, `Expected 200, got ${botRes.status}`);
-            assertContains(botRes.text, "<!DOCTYPE html>", "prerendered HTML");
-            assertContains(botRes.text, "| Quick Lesson</title>", "prerendered title");
-        }, onStart));
-
-        results.push(await runTest("Bot prerender: lesson has OG + Twitter tags", async () => {
-            assertContains(botRes.text, 'property="og:type" content="article"', "prerendered OG");
-            assertContains(botRes.text, 'name="twitter:card" content="summary_large_image"', "prerendered Twitter");
-        }, onStart));
-    } else {
-        results.push(await runTest("Bot prerender: lesson tests (SKIPPED — no lessons in DB)", async () => {
-            assert(lessonsRes.status === 200,
-                `Cannot skip safely: /sitemap-lessons.xml returned ${lessonsRes.status}, so no lesson slug could be discovered and the lesson prerender tests did not run`);
-        }, onStart));
-    }
-
-    // Non-existent slug should not crash
+    // Non-existent slug should not crash. Always runs — needs no fixture.
     const missingRes = await httpGet("/story/this-slug-does-not-exist-999999", {
         "User-Agent": "Googlebot"
     });
@@ -334,6 +373,7 @@ async function botPrerenderTests(onStart?: (name: string) => void): Promise<Test
 
     return results;
 }
+
 
 async function headersTests(onStart?: (name: string) => void): Promise<TestResult[]> {
     const results: TestResult[] = [];
@@ -464,6 +504,85 @@ async function directoryPageTests(onStart?: (name: string) => void): Promise<Tes
 // Tag/Category page bot prerender tests
 // =============================================================================
 
+const TAG_PAGE_TESTS = [
+    "Tag page bot prerender: returns HTML",
+    "Tag page bot prerender: has OG meta tags",
+    "Tag page bot prerender: has Twitter card tags",
+    "Tag page bot prerender: has JSON-LD structured data",
+    "Tag page bot prerender: has canonical URL",
+    "Tag page bot prerender: has hreflang links",
+    "Tag page bot prerender: contains crawlable content links",
+    "Tag page bot prerender: language-prefixed URL works",
+    "Tag page: regular browser does NOT get prerendered HTML",
+    "Tag page bot prerender: /tag/ alias also works",
+] as const;
+
+async function tagPagePrerenderTests(tagSlug: string, onStart?: (name: string) => void): Promise<TestResult[]> {
+    const results: TestResult[] = [];
+    const botUA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
+
+    const botRes = await httpGet(`/cat/${tagSlug}`, { "User-Agent": botUA });
+
+    results.push(await runTest(TAG_PAGE_TESTS[0], async () => {
+        assert(botRes.status === 200, `Expected 200 for /cat/${tagSlug}, got ${botRes.status}`);
+        assertContains(botRes.text, "<!DOCTYPE html>", "prerendered HTML");
+        assertContains(botRes.text, "| Quick</title>", "prerendered title");
+    }, onStart));
+
+    results.push(await runTest(TAG_PAGE_TESTS[1], async () => {
+        assertContains(botRes.text, 'property="og:title"', "og:title");
+        assertContains(botRes.text, 'property="og:description"', "og:description");
+    }, onStart));
+
+    results.push(await runTest(TAG_PAGE_TESTS[2], async () => {
+        assertContains(botRes.text, 'name="twitter:card"', "twitter:card");
+        assertContains(botRes.text, 'name="twitter:title"', "twitter:title");
+    }, onStart));
+
+    results.push(await runTest(TAG_PAGE_TESTS[3], async () => {
+        assertContains(botRes.text, 'application/ld+json', "JSON-LD script tag");
+        assertContains(botRes.text, '"@type":"CollectionPage"', "CollectionPage type");
+    }, onStart));
+
+    results.push(await runTest(TAG_PAGE_TESTS[4], async () => {
+        assertContains(botRes.text, '<link rel="canonical"', "canonical link");
+    }, onStart));
+
+    results.push(await runTest(TAG_PAGE_TESTS[5], async () => {
+        assertContains(botRes.text, 'hreflang="en"', "hreflang en");
+        assertContains(botRes.text, 'hreflang="he"', "hreflang he");
+    }, onStart));
+
+    results.push(await runTest(TAG_PAGE_TESTS[6], async () => {
+        // If there are stories/lessons, they should be rendered as links
+        if (botRes.text.includes("<li>")) {
+            assertMatches(botRes.text, /href="[^"]*\/(story|lesson)\/[^"]+"/, "content links");
+        }
+    }, onStart));
+
+    const langBotRes = await httpGet(`/en/cat/${tagSlug}`, { "User-Agent": "Googlebot" });
+    results.push(await runTest(TAG_PAGE_TESTS[7], async () => {
+        assert(langBotRes.status === 200, `Expected 200 for /en/cat/${tagSlug}, got ${langBotRes.status}`);
+        assertContains(langBotRes.text, "<!DOCTYPE html>", "prerendered HTML");
+        assertContains(langBotRes.text, 'lang="en"', "lang attribute");
+    }, onStart));
+
+    const browserRes = await httpGet(`/cat/${tagSlug}`, {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    });
+    results.push(await runTest(TAG_PAGE_TESTS[8], async () => {
+        assertNotContains(browserRes.text, "| Quick</title>", "browser response");
+    }, onStart));
+
+    const aliasRes = await httpGet(`/tag/${tagSlug}`, { "User-Agent": "Googlebot" });
+    results.push(await runTest(TAG_PAGE_TESTS[9], async () => {
+        assert(aliasRes.status === 200, `Expected 200 for /tag/${tagSlug}, got ${aliasRes.status}`);
+        assertContains(aliasRes.text, "<!DOCTYPE html>", "prerendered HTML");
+    }, onStart));
+
+    return results;
+}
+
 async function tagPageTests(onStart?: (name: string) => void): Promise<TestResult[]> {
     const results: TestResult[] = [];
 
@@ -472,73 +591,13 @@ async function tagPageTests(onStart?: (name: string) => void): Promise<TestResul
     const tagMatch = tagsRes.text.match(/\/cat\/([^<]+)</);
     const tagSlug = tagMatch ? tagMatch[1] : null;
 
-    if (tagSlug) {
-        const botRes = await httpGet(`/cat/${tagSlug}`, {
-            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-        });
+    results.push(...(tagSlug
+        ? await tagPagePrerenderTests(tagSlug, onStart)
+        : unrunResults(TAG_PAGE_TESTS, tagsRes.status === 200,
+            "no tags in /sitemap-tags-en.xml",
+            `/sitemap-tags-en.xml returned ${tagsRes.status}, so no tag slug could be discovered`)));
 
-        results.push(await runTest(`Tag page bot prerender: returns HTML (/cat/${tagSlug.substring(0, 25)}...)`, async () => {
-            assert(botRes.status === 200, `Expected 200, got ${botRes.status}`);
-            assertContains(botRes.text, "<!DOCTYPE html>", "prerendered HTML");
-            assertContains(botRes.text, "| Quick</title>", "prerendered title");
-        }, onStart));
-
-        results.push(await runTest("Tag page bot prerender: has OG meta tags", async () => {
-            assertContains(botRes.text, 'property="og:title"', "og:title");
-            assertContains(botRes.text, 'property="og:description"', "og:description");
-        }, onStart));
-
-        results.push(await runTest("Tag page bot prerender: has Twitter card tags", async () => {
-            assertContains(botRes.text, 'name="twitter:card"', "twitter:card");
-            assertContains(botRes.text, 'name="twitter:title"', "twitter:title");
-        }, onStart));
-
-        results.push(await runTest("Tag page bot prerender: has JSON-LD structured data", async () => {
-            assertContains(botRes.text, 'application/ld+json', "JSON-LD script tag");
-            assertContains(botRes.text, '"@type":"CollectionPage"', "CollectionPage type");
-        }, onStart));
-
-        results.push(await runTest("Tag page bot prerender: has canonical URL", async () => {
-            assertContains(botRes.text, '<link rel="canonical"', "canonical link");
-        }, onStart));
-
-        results.push(await runTest("Tag page bot prerender: has hreflang links", async () => {
-            assertContains(botRes.text, 'hreflang="en"', "hreflang en");
-            assertContains(botRes.text, 'hreflang="he"', "hreflang he");
-        }, onStart));
-
-        results.push(await runTest("Tag page bot prerender: contains crawlable content links", async () => {
-            // If there are stories/lessons, they should be rendered as links
-            if (botRes.text.includes("<li>")) {
-                assertMatches(botRes.text, /href="[^"]*\/(story|lesson)\/[^"]+"/,  "content links");
-            }
-        }, onStart));
-
-        // Language-prefixed tag page
-        const langBotRes = await httpGet(`/en/cat/${tagSlug}`, {
-            "User-Agent": "Googlebot"
-        });
-        results.push(await runTest("Tag page bot prerender: language-prefixed URL works", async () => {
-            assert(langBotRes.status === 200, `Expected 200, got ${langBotRes.status}`);
-            assertContains(langBotRes.text, "<!DOCTYPE html>", "prerendered HTML");
-            assertContains(langBotRes.text, 'lang="en"', "lang attribute");
-        }, onStart));
-
-        // Non-bot should NOT get prerendered HTML
-        const browserRes = await httpGet(`/cat/${tagSlug}`, {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        });
-        results.push(await runTest("Tag page: regular browser does NOT get prerendered HTML", async () => {
-            assertNotContains(browserRes.text, "| Quick</title>", "browser response");
-        }, onStart));
-    } else {
-        results.push(await runTest("Tag page bot prerender tests (SKIPPED — no tags in DB)", async () => {
-            assert(tagsRes.status === 200,
-                `Cannot skip safely: /sitemap-tags-en.xml returned ${tagsRes.status}, so no tag slug could be discovered and the tag page prerender tests did not run`);
-        }, onStart));
-    }
-
-    // Non-existent tag should not crash
+    // Non-existent tag should not crash. Always runs — needs no fixture.
     const missingRes = await httpGet("/cat/this-tag-does-not-exist-999999", {
         "User-Agent": "Googlebot"
     });
@@ -546,19 +605,9 @@ async function tagPageTests(onStart?: (name: string) => void): Promise<TestResul
         assert(missingRes.status <= 404, `Expected <= 404, got ${missingRes.status}`);
     }, onStart));
 
-    // /tag/ alias should also work
-    if (tagSlug) {
-        const aliasRes = await httpGet(`/tag/${tagSlug}`, {
-            "User-Agent": "Googlebot"
-        });
-        results.push(await runTest("Tag page bot prerender: /tag/ alias also works", async () => {
-            assert(aliasRes.status === 200, `Expected 200, got ${aliasRes.status}`);
-            assertContains(aliasRes.text, "<!DOCTYPE html>", "prerendered HTML");
-        }, onStart));
-    }
-
     return results;
 }
+
 
 // =============================================================================
 // Export the category
@@ -567,7 +616,6 @@ async function tagPageTests(onStart?: (name: string) => void): Promise<TestResul
 export const seoTestCategory: TestCategory = {
     name: "SEO",
     description: "Sitemaps, robots.txt, bot pre-rendering, tag pages, directory pages, and HTTP headers",
-    testCount: 60,
     run: async (onResult, onStart) => {
         const results: TestResult[] = [];
         const emit = (r: TestResult) => { results.push(r); onResult?.(r); };
