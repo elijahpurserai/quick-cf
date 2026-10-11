@@ -387,5 +387,13 @@
     "sitemapPage.storiesFor7Plus": "סיפורים לבני 7+",
     "sitemapPage.fullStoryIndex": "אינדקס מלא של כל אגדות",
     "sitemapPage.fullLessonIndex": "ספרייה מלאה של כל השיעורים",
-    "sitemapPage.termsPrivacy": "תנאים ופרטיות"
+    "sitemapPage.termsPrivacy": "תנאים ופרטיות",
+    "generate.ideaCount": "כמה רעיונות",
+    "generate.language": "שפה",
+    "generate.category": "קטגוריה",
+    "generate.allCategories": "כל הקטגוריות",
+    "generate.suggestPrompts": "הצע {count} רעיונות",
+    "generate.shortOfTarget": "התקבלו {received} מתוך {requested} רעיונות — {duplicates} כפילויות הוסרו בין המנות.",
+    "generate.viewStory": "צפייה בסיפור",
+    "generate.viewLesson": "צפייה בשיעור"
 }

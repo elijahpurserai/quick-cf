@@ -9,6 +9,10 @@ import {
     EDUCATION_CATEGORIES,
     OPENAI_MODEL,
     SUGGESTION_COUNT,
+    SUGGESTION_CHUNK_SIZE,
+    MAX_SUGGESTION_COUNT,
+    SUGGESTION_CHUNK_CONCURRENCY,
+    LANGUAGE_NAMES,
     DEFAULT_STORY_DURATION,
     DEFAULT_LESSON_DURATION,
     BATCH_CONCURRENCY,
@@ -18,6 +22,14 @@ import {
     SEED_LESSON_SYSTEM_PROMPT,
     SUGGEST_PROMPTS_SYSTEM_PROMPT,
     SUGGEST_PROMPTS_EDUCATION_INSTRUCTIONS,
+    SUGGEST_PROMPTS_SINGLE_CATEGORY_INSTRUCTIONS,
+    SUGGEST_PROMPTS_VARIETY_INSTRUCTIONS,
+    LANGUAGE_OVERRIDE_INSTRUCTIONS,
+    LANGUAGE_INFERRED_INSTRUCTIONS,
+    SEED_LANGUAGE_OVERRIDE_INSTRUCTIONS,
+    SEED_LANGUAGE_INFERRED_INSTRUCTIONS,
+    SEED_CATEGORY_ANY_INSTRUCTIONS,
+    SEED_CATEGORY_PINNED_INSTRUCTIONS,
     IMAGE_PROMPT_TEMPLATE,
     interpolatePrompt,
 } from "./prompts";
@@ -44,19 +56,89 @@ const isApproved = (req: AuthRequest, res: Response, next: NextFunction) => {
     next();
 };
 
+/**
+ * "all" means the model rotates through every education category, which is the
+ * historical seeding behaviour. Any other value pins every idea to that category.
+ */
+const CategorySchema = z.string().optional();
+
+/** A UI language code, or undefined to let the model infer it from the prompt. */
+const LanguageSchema = z.string().optional();
+
+/** True when the caller pinned a real category (not the "all" sentinel). */
+const isPinnedCategory = (category?: string): boolean =>
+    !!category && category !== "all";
+
+/**
+ * Language directive for a prompt template.
+ *
+ * With no explicit language the model infers one from the prompt — the historical
+ * behaviour, and the reason a Hebrew base instruction quietly produced Hebrew
+ * content. An explicit code overrides that for both ideas and generated content.
+ */
+const languageInstructionsFor = (language: string | undefined, seed: boolean): string => {
+    const name = language ? LANGUAGE_NAMES[language] : undefined;
+    if (!language || !name) {
+        return seed ? SEED_LANGUAGE_INFERRED_INSTRUCTIONS : LANGUAGE_INFERRED_INSTRUCTIONS;
+    }
+    return interpolatePrompt(
+        seed ? SEED_LANGUAGE_OVERRIDE_INSTRUCTIONS : LANGUAGE_OVERRIDE_INSTRUCTIONS,
+        { languageName: name, languageCode: language },
+    );
+};
+
+/**
+ * Split a total into chunks of at most SUGGESTION_CHUNK_SIZE.
+ * 300 → [50,50,50,50,50,50]; 120 → [50,50,20].
+ */
+const chunkSizesFor = (total: number): number[] => {
+    const sizes: number[] = [];
+    let remaining = total;
+    while (remaining > 0) {
+        sizes.push(Math.min(SUGGESTION_CHUNK_SIZE, remaining));
+        remaining -= SUGGESTION_CHUNK_SIZE;
+    }
+    return sizes;
+};
+
+/** Run tasks with a ceiling on how many are in flight at once. */
+async function runWithConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
+    const results: T[] = new Array(tasks.length);
+    let cursor = 0;
+
+    const worker = async () => {
+        while (cursor < tasks.length) {
+            const index = cursor++;
+            results[index] = await tasks[index]();
+        }
+    };
+
+    await Promise.all(
+        Array.from({ length: Math.min(limit, tasks.length) }, () => worker()),
+    );
+    return results;
+}
+
 const SuggestPromptsSchema = z.object({
     type: z.enum(["story", "lesson"]),
     basePrompt: z.string(),
+    count: z.number().int().min(1).max(MAX_SUGGESTION_COUNT).optional(),
+    category: CategorySchema,
+    language: LanguageSchema,
 });
 
 const GenerateSeedContentSchema = z.object({
     type: z.enum(["story", "lesson"]),
     title: z.string(),
     prompt: z.string(),
+    category: CategorySchema,
+    language: LanguageSchema,
 });
 
 const BatchSchema = z.object({
     type: z.enum(["story", "lesson"]),
+    category: CategorySchema,
+    language: LanguageSchema,
     items: z.array(z.object({
         title: z.string(),
         prompt: z.string(),
@@ -109,30 +191,93 @@ const getStoryLengthGuidance = (durationMinutes: number) => {
 
 generatorRoutes.post("/suggest-prompts", authenticateJWT, isApproved, async (req: AuthRequest, res) => {
     try {
-        const { type, basePrompt } = SuggestPromptsSchema.parse(req.body);
+        const { type, basePrompt, count, category, language } = SuggestPromptsSchema.parse(req.body);
 
+        const total = count ?? SUGGESTION_COUNT;
+        const sizes = chunkSizesFor(total);
+
+        // A single call reliably under-delivers past ~50 items (a request for 100 came
+        // back with ~50), so the total is spread over several calls and merged.
         const educationInstructions = type === "story"
-            ? interpolatePrompt(SUGGEST_PROMPTS_EDUCATION_INSTRUCTIONS, { educationCategories: EDUCATION_CATEGORIES.join(", ") })
+            ? (isPinnedCategory(category)
+                ? interpolatePrompt(SUGGEST_PROMPTS_SINGLE_CATEGORY_INSTRUCTIONS, { category: category! })
+                : interpolatePrompt(SUGGEST_PROMPTS_EDUCATION_INSTRUCTIONS, { educationCategories: EDUCATION_CATEGORIES.join(", ") }))
             : "";
 
-        const systemPrompt = interpolatePrompt(SUGGEST_PROMPTS_SYSTEM_PROMPT, {
-            typeDescription: type === "story" ? "bedtime stories (including educational ones)" : "educational lessons",
-            educationInstructions,
-            basePrompt,
-            suggestionCount: SUGGESTION_COUNT,
-            type,
+        const languageInstructions = languageInstructionsFor(language, false);
+
+        const tasks = sizes.map((size, i) => async () => {
+            // Chunks run blind to each other; without this they converge on the same
+            // obvious ideas and the merged list comes back far short of the target.
+            const varietyInstructions = sizes.length > 1
+                ? interpolatePrompt(SUGGEST_PROMPTS_VARIETY_INSTRUCTIONS, { chunkIndex: i + 1, chunkTotal: sizes.length })
+                : "";
+
+            const systemPrompt = interpolatePrompt(SUGGEST_PROMPTS_SYSTEM_PROMPT, {
+                typeDescription: type === "story" ? "bedtime stories (including educational ones)" : "educational lessons",
+                educationInstructions,
+                languageInstructions,
+                varietyInstructions,
+                basePrompt,
+                suggestionCount: size,
+                type,
+            });
+
+            try {
+                const completion = await openai.chat.completions.create({
+                    model: OPENAI_MODEL,
+                    // Independent calls with identical inputs would otherwise overlap heavily.
+                    temperature: 1,
+                    messages: [{ role: "system", content: systemPrompt }],
+                    response_format: { type: "json_object" },
+                });
+
+                const content = completion.choices[0].message.content;
+                if (!content) return [];
+
+                const parsed = JSON.parse(content);
+                return Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
+            } catch (err) {
+                // One bad chunk shouldn't sink the whole request — the caller is told
+                // how many actually arrived.
+                console.error(`[Suggest] Chunk ${i + 1}/${sizes.length} failed:`, err instanceof Error ? err.message : err);
+                return [];
+            }
         });
 
-        const completion = await openai.chat.completions.create({
-            model: OPENAI_MODEL,
-            messages: [{ role: "system", content: systemPrompt }],
-            response_format: { type: "json_object" },
+        const chunks = await runWithConcurrency(tasks, SUGGESTION_CHUNK_CONCURRENCY);
+
+        // Merge, dropping repeats across chunks. Titles are compared case- and
+        // whitespace-insensitively, since near-identical titles are the usual overlap.
+        const seen = new Set<string>();
+        const suggestions: any[] = [];
+        for (const chunk of chunks) {
+            for (const item of chunk) {
+                const title = typeof item?.title === "string" ? item.title : "";
+                const prompt = typeof item?.prompt === "string" ? item.prompt : "";
+                if (!title || !prompt) continue;
+
+                const key = title.trim().toLowerCase().replace(/\s+/g, " ");
+                if (seen.has(key)) continue;
+                seen.add(key);
+                suggestions.push({ title, prompt });
+
+                if (suggestions.length >= total) break;
+            }
+            if (suggestions.length >= total) break;
+        }
+
+        const rawCount = chunks.reduce((n, c) => n + c.length, 0);
+        console.log(`[Suggest] ${type}: requested ${total} over ${sizes.length} chunk(s) → ${rawCount} raw, ${suggestions.length} after dedupe`);
+
+        res.json({
+            suggestions,
+            // The UI surfaces these so a short result is visible rather than silent.
+            requested: total,
+            received: suggestions.length,
+            duplicatesRemoved: rawCount - suggestions.length,
+            chunks: sizes.length,
         });
-
-        const content = completion.choices[0].message.content;
-        if (!content) throw new Error("No suggestions generated");
-
-        res.json(JSON.parse(content));
     } catch (error) {
         console.error("Suggest Prompts Error:", error);
         res.status(500).json({ error: "Failed to suggest prompts", details: error instanceof Error ? error.message : String(error) });
@@ -145,9 +290,9 @@ generatorRoutes.post("/suggest-prompts", authenticateJWT, isApproved, async (req
 
 generatorRoutes.post("/generate-seed-content", authenticateJWT, isApproved, async (req: AuthRequest, res) => {
     try {
-        const { type, title, prompt } = GenerateSeedContentSchema.parse(req.body);
+        const { type, title, prompt, category, language } = GenerateSeedContentSchema.parse(req.body);
         const userId = req.user?.id;
-        const result = await generateAndSaveSeedContent(type, title, prompt, userId);
+        const result = await generateAndSaveSeedContent(type, title, prompt, userId, { category, language });
         res.json(result);
     } catch (error) {
         console.error("Generate Seed Content Error:", error);
@@ -167,7 +312,7 @@ generatorRoutes.post("/generate-seed-batch/stream", authenticateJWT, isApproved,
         return res.status(400).json({ error: "Invalid batch request", details: error instanceof Error ? error.message : String(error) });
     }
 
-    const { type, items } = parsed;
+    const { type, items, category, language } = parsed;
     const userId = req.user?.id;
 
     // Set up SSE headers
@@ -195,13 +340,16 @@ generatorRoutes.post("/generate-seed-batch/stream", authenticateJWT, isApproved,
             send("item_start", { index: item.index, title: item.title });
 
             try {
-                const result = await generateAndSaveSeedContent(type, item.title, item.prompt, userId);
+                const result = await generateAndSaveSeedContent(type, item.title, item.prompt, userId, { category, language });
                 succeeded++;
                 send("item_done", {
                     index: item.index,
                     title: result.title,
                     id: result.id,
                     slug: result.slug,
+                    // Needed to build the creation's URL: a creation is only served
+                    // under the prefix matching its own language.
+                    language: result.language,
                     description: result.description,
                     status: "success",
                 });
@@ -242,20 +390,35 @@ generatorRoutes.post("/generate-seed-batch/stream", authenticateJWT, isApproved,
 // Core generation helper (used by both single + batch endpoints)
 // =============================================================================
 
+interface SeedOptions {
+    /** Pinned education category, or "all"/undefined to let the model choose. */
+    category?: string;
+    /** Pinned output language code, or undefined to infer it from the prompt. */
+    language?: string;
+}
+
 async function generateAndSaveSeedContent(
     type: "story" | "lesson",
     title: string,
     prompt: string,
-    userId?: string
-): Promise<{ id: string; slug: string; title: string; description?: string; imagePrompt?: string }> {
+    userId?: string,
+    options: SeedOptions = {}
+): Promise<{ id: string; slug: string; title: string; language: string; description?: string; imagePrompt?: string }> {
+    const languageInstructions = languageInstructionsFor(options.language, true);
     if (type === "story") {
         const { targetWords, chapters } = getStoryLengthGuidance(DEFAULT_STORY_DURATION);
+        const categoryInstructions = isPinnedCategory(options.category)
+            ? interpolatePrompt(SEED_CATEGORY_PINNED_INSTRUCTIONS, { category: options.category! })
+            : interpolatePrompt(SEED_CATEGORY_ANY_INSTRUCTIONS, { educationCategories: EDUCATION_CATEGORIES.join(", ") });
+
         const systemPrompt = interpolatePrompt(SEED_STORY_SYSTEM_PROMPT, {
             prompt,
             targetWords,
             duration: DEFAULT_STORY_DURATION,
             chapters,
             educationCategories: EDUCATION_CATEGORIES.join(", "),
+            languageInstructions,
+            categoryInstructions,
         });
 
         const completion = await openai.chat.completions.create({
@@ -283,6 +446,12 @@ async function generateAndSaveSeedContent(
         });
         if (creationError) throw creationError;
 
+        // With no pinned language the model picks one from the prompt, so a Hebrew base
+        // instruction yields a Hebrew story. Either way callers need the result to build
+        // a URL under the right language prefix (see server/content_lang.ts) — and a
+        // pinned language wins, since the model occasionally ignores the directive.
+        const language = options.language || generatedData.language || "en";
+
         const { error: storyError } = await supabase.from('stories').insert({
             id: storyId,
             content: generatedData.content,
@@ -292,7 +461,7 @@ async function generateAndSaveSeedContent(
             purpose: generatedData.purpose || "Storytelling",
             education_category: generatedData.educationCategory || "General",
             duration_mins: DEFAULT_STORY_DURATION,
-            language: generatedData.language || "en",
+            language,
             metadata: {
                 additionalInfo: generatedData.additionalInfo || "",
                 imagePrompt: generatedData.imagePrompt || ""
@@ -317,12 +486,13 @@ async function generateAndSaveSeedContent(
             }
         }
 
-        return { id: storyId, slug, title: finalTitle, description: generatedData.description, imagePrompt: generatedData.imagePrompt };
+        return { id: storyId, slug, title: finalTitle, language, description: generatedData.description, imagePrompt: generatedData.imagePrompt };
 
     } else {
         const systemPrompt = interpolatePrompt(SEED_LESSON_SYSTEM_PROMPT, {
             prompt,
             duration: DEFAULT_LESSON_DURATION,
+            languageInstructions,
         });
 
         const completion = await openai.chat.completions.create({
@@ -350,6 +520,8 @@ async function generateAndSaveSeedContent(
         });
         if (creationError) throw creationError;
 
+        const language = options.language || generatedData.language || "en";
+
         const { error: lessonError } = await supabase.from('lessons').insert({
             id: lessonId,
             content: generatedData.content,
@@ -357,7 +529,7 @@ async function generateAndSaveSeedContent(
             level: generatedData.level || "General",
             tone: generatedData.tone || "Fun",
             duration_mins: Number(generatedData.duration_mins) || DEFAULT_LESSON_DURATION,
-            language: generatedData.language || "en"
+            language
         });
         if (lessonError) throw lessonError;
 
@@ -378,7 +550,7 @@ async function generateAndSaveSeedContent(
             }
         }
 
-        return { id: lessonId, slug, title: finalTitle, description: generatedData.description, imagePrompt: generatedData.imagePrompt };
+        return { id: lessonId, slug, title: finalTitle, language, description: generatedData.description, imagePrompt: generatedData.imagePrompt };
     }
 }
 

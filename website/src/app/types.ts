@@ -119,6 +119,26 @@ export const EDUCATION_CATEGORIES = [
   "Other",
 ];
 
+/**
+ * Maps English category values to i18n keys.
+ *
+ * Lives here rather than in a component because both the user-facing Story form
+ * and the admin Batch Generator render this list and must label it identically.
+ */
+export const EDUCATION_CATEGORY_KEYS: Record<string, string> = {
+  "Emotional Intelligence": "storyForm.catEmotionalIntelligence",
+  "Sharing": "storyForm.catSharing",
+  "Confidence": "storyForm.catConfidence",
+  "Dealing with Fear": "storyForm.catDealingWithFear",
+  "Potty Training": "storyForm.catPottyTraining",
+  "First Day of School": "storyForm.catFirstDayOfSchool",
+  "Bullying": "storyForm.catBullying",
+  "Losing a Tooth": "storyForm.catLosingATooth",
+  "Bedtime Anxiety": "storyForm.catBedtimeAnxiety",
+  "Healthy Eating": "storyForm.catHealthyEating",
+  "Other": "storyForm.catOther",
+};
+
 export const DURATION_OPTIONS = [
   { label: "7 minutes", value: 7 },
   { label: "10 minutes", value: 10 },

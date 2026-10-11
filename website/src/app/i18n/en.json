@@ -387,5 +387,13 @@
     "sitemapPage.storiesFor7Plus": "Stories for 7+ Year Olds",
     "sitemapPage.fullStoryIndex": "Full Index of All Fairy Tales",
     "sitemapPage.fullLessonIndex": "Complete Library of All Lessons",
-    "sitemapPage.termsPrivacy": "Terms & Privacy"
+    "sitemapPage.termsPrivacy": "Terms & Privacy",
+    "generate.ideaCount": "How many ideas",
+    "generate.language": "Language",
+    "generate.category": "Category",
+    "generate.allCategories": "All categories",
+    "generate.suggestPrompts": "Suggest {count} Ideas",
+    "generate.shortOfTarget": "Got {received} of {requested} ideas — {duplicates} duplicates removed across batches.",
+    "generate.viewStory": "View story",
+    "generate.viewLesson": "View lesson"
 }

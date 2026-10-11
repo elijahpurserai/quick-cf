@@ -202,7 +202,7 @@ export const SEED_STORY_SYSTEM_PROMPT = `You are a world-class children's storyt
             - Use a few emojis sparingly for magic.
 
             CRITICAL LANGUAGE & LOGIC INSTRUCTIONS:
-            - Determine the primary language of the user's prompt (e.g., English, Hebrew, Spanish, etc.).
+            - {languageInstructions}
             - THERE MUST BE ONLY ONE LANGUAGE USED THROUGHOUT THE ENTIRE STORY CONTENT. The final story content MUST be written entirely in that same language. Do NOT mix languages or include single words from other languages in the story content. The JSON keys and other metadata should remain as instructed (keys in English, values appropriate for the field).
             - The story MUST be completely logical. Avoid bizarre or impossible combinations (e.g., eating chicken for dessert).
 
@@ -212,7 +212,7 @@ export const SEED_STORY_SYSTEM_PROMPT = `You are a world-class children's storyt
             - "age": Pick a realistic age (2-10).
             - "gender": Pick male, female, or unspecified.
             - "purpose": Set to "Bedtime", "Educational", or "Adventure" based on the prompt.
-            - "educationCategory": If it's educational, pick one from: {educationCategories}. Otherwise "General".
+            - "educationCategory": {categoryInstructions}
             - "additionalInfo": Add a small personal detail a parent might include (e.g., "loves blue cars", "is a bit shy", "has a pet bunny named Fluff").
 
             IMAGE PROMPT INSTRUCTIONS:
@@ -256,7 +256,7 @@ export const SEED_LESSON_SYSTEM_PROMPT = `You are an expert educator and SEO spe
             - Structure into sections with EXACTLY '### [Emoji] Section Name' as headings. Do not use # or ##.
             - Provide the lesson content primarily using rich, descriptive paragraphs.
             CRITICAL LANGUAGE & LOGIC INSTRUCTIONS:
-            - Determine the primary language of the user's prompt (e.g., English, Hebrew, Spanish, etc.).
+            - {languageInstructions}
             - THERE MUST BE ONLY ONE LANGUAGE USED THROUGHOUT THE ENTIRE LESSON CONTENT. The final lesson content MUST be written entirely in that same language. Do NOT mix languages or include single words from other languages in the lesson content.
             - The lesson MUST be completely logical, age-appropriate, and make complete cohesive sense.
 
@@ -298,11 +298,15 @@ export const IMAGE_PROMPT_TEMPLATE = `A purely visual, text-free illustration fo
 // =============================================================================
 
 export const SUGGEST_PROMPTS_SYSTEM_PROMPT = `You are a content strategist for a children's educational and storytelling website.
-        Your goal is to suggest 100 diverse, engaging, and SEO-friendly titles and brief prompts for {typeDescription}.
+        Your goal is to suggest {suggestionCount} diverse, engaging, and SEO-friendly titles and brief prompts for {typeDescription}.
 
         {educationInstructions}
 
+        {languageInstructions}
+
         The user's base instruction is: "{basePrompt}"
+
+        {varietyInstructions}
 
         Return exactly {suggestionCount} items in a JSON array. Each item must have:
         - "title": A catchy, SEO-optimized title.
@@ -313,6 +317,37 @@ export const SUGGEST_PROMPTS_SYSTEM_PROMPT = `You are a content strategist for a
 export const SUGGEST_PROMPTS_EDUCATION_INSTRUCTIONS = `IMPORTANT: Some of these should be "Bedtime Stories" and some should be "Educational Stories".
         For Educational Stories, rotate through these categories: {educationCategories}.
         The prompt should specify the category if it's educational.`;
+
+/** Used instead of the rotate-through-all text when the admin pins one category. */
+export const SUGGEST_PROMPTS_SINGLE_CATEGORY_INSTRUCTIONS = `IMPORTANT: EVERY suggestion must be an "Educational Story" in this category: {category}.
+        Do not suggest ideas from any other category. Each prompt should explicitly state the category.`;
+
+/** Target-language directive shared by the suggestion and seed-content prompts. */
+export const LANGUAGE_OVERRIDE_INSTRUCTIONS = `CRITICAL LANGUAGE INSTRUCTION: The target language is {languageName} ({languageCode}).
+        Write ALL titles and prompts entirely in {languageName}. Do not use any other language, and do not translate or transliterate into English.`;
+
+/** Default language behaviour when the admin hasn't pinned one. */
+export const LANGUAGE_INFERRED_INSTRUCTIONS = `Determine the primary language of the user's prompt (e.g., English, Hebrew, Spanish, etc.) and write all titles and prompts in that language.`;
+
+/** Seed-content variants of the two directives above (content, not just titles). */
+export const SEED_LANGUAGE_INFERRED_INSTRUCTIONS = `Determine the primary language of the user's prompt (e.g., English, Hebrew, Spanish, etc.).`;
+
+export const SEED_LANGUAGE_OVERRIDE_INSTRUCTIONS = `The target language is {languageName} ({languageCode}) — ignore the language of the prompt and write the content entirely in {languageName}. Set "language" to "{languageCode}".`;
+
+/** educationCategory directive for seed stories: rotate freely, or pin one. */
+export const SEED_CATEGORY_ANY_INSTRUCTIONS = `If it's educational, pick one from: {educationCategories}. Otherwise "General".`;
+
+export const SEED_CATEGORY_PINNED_INSTRUCTIONS = `Set this to EXACTLY "{category}", and make the story genuinely about that topic.`;
+
+/**
+ * Appended when a total is split across several independent calls.
+ *
+ * The calls don't see each other, so without a nudge they converge on the same
+ * obvious ideas and the merged, de-duplicated list comes back well short.
+ */
+export const SUGGEST_PROMPTS_VARIETY_INSTRUCTIONS = `This is batch {chunkIndex} of {chunkTotal} being generated for the same base instruction, and the batches are merged afterwards with duplicates removed.
+        Explore a DISTINCT angle from what an obvious first batch would produce: vary the settings, character types, age ranges, conflicts and story shapes.
+        Every title must be unique and specific — avoid generic phrasings that another batch would also produce.`;
 
 // =============================================================================
 // Structured metadata for the admin Prompts page

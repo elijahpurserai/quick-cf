@@ -25,8 +25,23 @@ export const APPROVED_EMAILS = ["elijah@purserai.com", "adi@purserai.com"];
 
 // --- Content Generation ---
 
-/** Number of prompt suggestions returned by the batch tool */
-export const SUGGESTION_COUNT = 80;
+/** Default number of prompt suggestions requested by the batch tool */
+export const SUGGESTION_COUNT = 100;
+
+/**
+ * Ideas requested per model call.
+ *
+ * Asking a single call for 100+ items reliably under-delivers — a request for 100
+ * came back with roughly 50. The model is dependable at this size, so larger totals
+ * are split into several calls of this size and merged.
+ */
+export const SUGGESTION_CHUNK_SIZE = 50;
+
+/** Upper bound on the total ideas one suggest request may ask for. */
+export const MAX_SUGGESTION_COUNT = 500;
+
+/** How many suggestion chunk calls run at once. */
+export const SUGGESTION_CHUNK_CONCURRENCY = 6;
 
 /** Number of parallel content generations in the batch tool */
 export const BATCH_CONCURRENCY = 20;
@@ -38,6 +53,23 @@ export const DEFAULT_STORY_DURATION = 7;
 export const DEFAULT_LESSON_DURATION = 10;
 
 // --- Education Categories (server-side copy for prompts) ---
+// --- Languages (server-side copy of the frontend's SUPPORTED_LANGUAGES) ---
+// Used to name the target language in prompts. Keep in sync with
+// website/src/app/config.ts SUPPORTED_LANGUAGES.
+export const LANGUAGE_NAMES: Record<string, string> = {
+    en: "English",
+    es: "Spanish",
+    fr: "French",
+    de: "German",
+    it: "Italian",
+    pt: "Portuguese",
+    zh: "Chinese",
+    ja: "Japanese",
+    ko: "Korean",
+    ar: "Arabic",
+    he: "Hebrew",
+};
+
 export const EDUCATION_CATEGORIES = [
     "Emotional Intelligence",
     "Sharing",

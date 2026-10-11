@@ -15,26 +15,11 @@ import {
 import { cn } from "./ui/utils";
 import { Badge } from "./ui/badge";
 import { Sparkles, Plus, X, ChevronDown, Lock, Globe, Check, Link2 } from "lucide-react";
-import { EDUCATION_CATEGORIES, DURATION_OPTIONS, StoryFormData, HeroProfile, Visibility } from "../types";
+import { EDUCATION_CATEGORIES, EDUCATION_CATEGORY_KEYS, DURATION_OPTIONS, StoryFormData, HeroProfile, Visibility } from "../types";
 import { SUPPORTED_LANGUAGES, AGE_RANGE, MAX_CUSTOM_DURATION } from "../config";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useApp } from "../contexts/AppContext";
 import { LoginRequiredModal } from "./LoginRequiredModal";
-
-// Maps English category values to i18n keys
-const EDUCATION_CATEGORY_KEYS: Record<string, string> = {
-  "Emotional Intelligence": "storyForm.catEmotionalIntelligence",
-  "Sharing": "storyForm.catSharing",
-  "Confidence": "storyForm.catConfidence",
-  "Dealing with Fear": "storyForm.catDealingWithFear",
-  "Potty Training": "storyForm.catPottyTraining",
-  "First Day of School": "storyForm.catFirstDayOfSchool",
-  "Bullying": "storyForm.catBullying",
-  "Losing a Tooth": "storyForm.catLosingATooth",
-  "Bedtime Anxiety": "storyForm.catBedtimeAnxiety",
-  "Healthy Eating": "storyForm.catHealthyEating",
-  "Other": "storyForm.catOther",
-};
 
 // Maps duration values to i18n keys
 const DURATION_LABEL_KEYS: Record<number, string> = {
